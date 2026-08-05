@@ -39,6 +39,11 @@ export async function refreshWorkspace(opts = {}) {
       );
     }
     await Promise.all(tasks);
+    // If the server forgot everything (cold start), drop stale scan IDs and
+    // stop showing a fake "N scanned" count from a previous instance.
+    if (!(store.get().creators || []).length) {
+      store.resetScanHistory();
+    }
     store.bumpData("workspace-refresh");
   } finally {
     refreshing = false;

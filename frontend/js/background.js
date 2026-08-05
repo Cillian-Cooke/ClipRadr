@@ -14,6 +14,12 @@ async function scanNext() {
   const next = s.scanQueue[0];
   if (!next) return;
 
+  // If the server no longer has creators, stop burning scans on dead video IDs.
+  if (!(store.get().creators || []).length) {
+    store.resetScanHistory();
+    return;
+  }
+
   s.busy = true;
   s.currentScanId = next;
   store.notify();
@@ -44,8 +50,15 @@ async function scanNext() {
     }
     await refreshWorkspace({ creatorId });
   } catch (e) {
-    store.markScanError(next, e.message);
-    store.bumpData("scan-error");
+    const msg = String(e?.message || e);
+    // Dead IDs after a cold start — don't keep counting them as progress.
+    if (/not found|404|video not found/i.test(msg)) {
+      store.markScanned(next);
+      await refreshWorkspace();
+    } else {
+      store.markScanError(next, msg);
+      store.bumpData("scan-error");
+    }
   } finally {
     store.get().busy = false;
     store.notify();
@@ -147,9 +160,16 @@ export async function restoreFollowedCreators() {
       return { restored: 0, synced: serverList.length };
     }
 
-    const followed = store.get().followedChannels || [];
-    if (!followed.length) return { restored: 0 };
+    // Server is empty — previous scanDone IDs are meaningless.
+    store.resetScanHistory();
 
+    const followed = store.get().followedChannels || [];
+    if (!followed.length) {
+      await refreshWorkspace();
+      return { restored: 0 };
+    }
+
+    store.bumpData("restoring");
     let restored = 0;
     for (const ch of followed) {
       try {

@@ -183,6 +183,16 @@ export const store = {
     this.notify();
   },
 
+  /** Drop stale scan history (e.g. after Vercel wiped the server DB). */
+  resetScanHistory() {
+    state.scanQueue = [];
+    state.scanDone = {};
+    state.scanErrors = {};
+    state.busy = false;
+    state.currentScanId = null;
+    this.notify();
+  },
+
   scanProgress() {
     const done = Object.keys(state.scanDone).length;
     const pending = state.scanQueue.length + (state.currentScanId ? 1 : 0);

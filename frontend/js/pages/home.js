@@ -50,10 +50,17 @@ function paint(root, data) {
   wrap.append(el("div", { class: "section-title", text: "Top Clip Opportunities" }));
   const list = el("div", { class: "card-list" });
   if (!data.top_opportunities?.length) {
+    const followed = store.get().followedChannels || [];
+    const creators = store.get().creators || [];
     list.append(
       el("div", {
         class: "empty-state",
-        text: "No moments yet — add a creator and let background scanning fill this queue.",
+        text:
+          !creators.length && followed.length
+            ? `Restoring ${followed.length} saved creator${followed.length === 1 ? "" : "s"}… moments will appear here when scans finish.`
+            : creators.length
+              ? "Scans are running — moments will show up here as each video finishes."
+              : "No moments yet — add a creator to start your clip queue.",
       })
     );
   }

@@ -47,13 +47,26 @@ export function renderShell(activePath, contentNode, { topbarExtra = null, conte
   const footer = el("div", { class: "sidebar-footer" });
   const scanPill = el("div", { class: "demo-pill", text: "Idle" });
   const updatePill = () => {
-    const { pending, busy, done } = store.scanProgress();
+    const { pending, busy } = store.scanProgress();
+    const creators = store.get().creators || [];
+    const followed = store.get().followedChannels || [];
+    const moments = store.get().home?.stats?.clip_moments_found || 0;
+    const videos = store.get().home?.stats?.videos_scanned || 0;
+
     if (busy || pending > 0) {
       scanPill.textContent = `Scanning ${pending} video${pending === 1 ? "" : "s"}…`;
       scanPill.classList.add("scanning");
-    } else if (done > 0) {
-      scanPill.textContent = `${done} scanned · cached`;
+    } else if (creators.length) {
+      scanPill.textContent =
+        moments > 0
+          ? `${moments} moments · live`
+          : videos > 0
+            ? `${videos} videos · ready`
+            : `${creators.length} creator${creators.length === 1 ? "" : "s"}`;
       scanPill.classList.remove("scanning");
+    } else if (followed.length) {
+      scanPill.textContent = "Restoring creators…";
+      scanPill.classList.add("scanning");
     } else {
       scanPill.textContent = "Ready";
       scanPill.classList.remove("scanning");
