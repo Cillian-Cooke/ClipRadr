@@ -4,6 +4,24 @@ version = "0.1.0"
 description = "Audience-powered clip discovery for YouTube long-form VODs"
 requires-python = ">=3.11"
 readme = "README.md"
+dependencies = [
+  "fastapi==0.115.6",
+  "uvicorn[standard]==0.34.0",
+  "sqlalchemy==2.0.36",
+  "aiosqlite==0.20.0",
+  "pydantic==2.10.4",
+  "pydantic-settings==2.7.0",
+  "python-dotenv==1.0.1",
+  "httpx==0.28.1",
+  "numpy==2.2.1",
+  "python-multipart==0.0.20",
+  "imageio-ffmpeg==0.6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==8.3.4",
+]
 
 [tool.vercel]
 entrypoint = "backend.main:app"
