@@ -30,6 +30,35 @@ def api_configured() -> bool:
     return bool(settings.youtube_api_key and settings.youtube_api_key.strip())
 
 
+_api_probe_cache: dict[str, Any] = {"at": 0.0, "ok": False, "error": None}
+
+
+def probe_api_key(*, force: bool = False) -> dict[str, Any]:
+    """Check whether the configured key is accepted by YouTube (cached ~60s)."""
+    import time
+
+    now = time.time()
+    if not force and _api_probe_cache["at"] and now - float(_api_probe_cache["at"]) < 60:
+        return {
+            "configured": api_configured(),
+            "valid": bool(_api_probe_cache["ok"]),
+            "error": _api_probe_cache["error"],
+        }
+
+    if not api_configured():
+        _api_probe_cache.update({"at": now, "ok": False, "error": "YOUTUBE_API_KEY is not set."})
+        return {"configured": False, "valid": False, "error": _api_probe_cache["error"]}
+
+    try:
+        # Cheap auth check — search costs ~100 units; channels.list with id is lighter.
+        _get("channels", {"part": "id", "id": "UC_x5XG1OV2P6uZZ5FSM9Ttw", "maxResults": "1"})
+        _api_probe_cache.update({"at": now, "ok": True, "error": None})
+        return {"configured": True, "valid": True, "error": None}
+    except YouTubeAPIError as exc:
+        _api_probe_cache.update({"at": now, "ok": False, "error": str(exc)})
+        return {"configured": True, "valid": False, "error": str(exc)}
+
+
 def _require_key() -> str:
     if not api_configured():
         raise YouTubeAPIError(
@@ -49,7 +78,15 @@ def _friendly_error(resp: httpx.Response) -> YouTubeAPIError:
         if reason == "quotaExceeded":
             message = "YouTube API quota exceeded for today. Try again tomorrow or use a different key."
         elif reason == "keyInvalid":
-            message = "YouTube API key is invalid. Check YOUTUBE_API_KEY in .env."
+            where = (
+                "Vercel → Project → Settings → Environment Variables"
+                if __import__("os").getenv("VERCEL") == "1"
+                else ".env"
+            )
+            message = (
+                f"YouTube API key is invalid. Update YOUTUBE_API_KEY in {where}, "
+                "enable YouTube Data API v3, remove HTTP-referrer restrictions, then redeploy."
+            )
         elif reason == "commentsDisabled":
             message = "Comments are disabled on this video."
         elif resp.status_code == 403:

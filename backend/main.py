@@ -51,20 +51,36 @@ def create_app() -> FastAPI:
     @app.get("/api/status")
     def status():
         from backend.services.ffmpeg import ffmpeg_available
-        from backend.services.youtube import api_configured
+        from backend.services.youtube import api_configured, probe_api_key
+
+        yt_probe = probe_api_key()
+        yt_ok = bool(yt_probe.get("valid"))
+
+        if not yt_probe.get("configured"):
+            hint = (
+                "Set YOUTUBE_API_KEY in Vercel → Project Settings → Environment Variables, then redeploy."
+                if IS_VERCEL
+                else "Set YOUTUBE_API_KEY in .env and restart to enable live creators."
+            )
+        elif not yt_ok:
+            hint = yt_probe.get("error") or "YouTube API key is set but invalid."
+        else:
+            hint = "YouTube API connected. Add a creator to import + scan."
 
         return {
             "app": "ClipRadar",
             "demo_mode": settings.demo_mode,
             "credentials": {
                 "youtube_api_key": api_configured(),
+                "youtube_api_valid": yt_ok,
+                "youtube_api_error": yt_probe.get("error"),
                 "openai_api_key": bool(settings.openai_api_key and settings.openai_api_key.strip()),
             },
             "capabilities": {
-                "add_live_creators": api_configured(),
-                "scan_comments": api_configured(),
+                "add_live_creators": yt_ok,
+                "scan_comments": yt_ok,
                 "export_clips": ffmpeg_available(),
-                "semantic_embeddings": "local",  # OpenAI optional later
+                "semantic_embeddings": "local",
             },
             "limits": {
                 "max_comments_per_video": settings.max_comments_per_video,
@@ -75,15 +91,7 @@ def create_app() -> FastAPI:
             "setup": {
                 "env_file": "Vercel project env" if IS_VERCEL else str(ROOT_DIR / ".env"),
                 "platform": "vercel" if IS_VERCEL else "local",
-                "hint": (
-                    "Set YOUTUBE_API_KEY in Vercel → Settings → Environment Variables."
-                    if IS_VERCEL and not api_configured()
-                    else (
-                        "Set YOUTUBE_API_KEY in .env and restart to enable live creators."
-                        if not api_configured()
-                        else "YouTube API connected. Add a creator URL to import + scan."
-                    )
-                ),
+                "hint": hint,
             },
         }
 

@@ -10,6 +10,7 @@ export async function renderCreators(root) {
       api.status().catch(() => null),
     ]);
     const liveReady = !!status?.capabilities?.add_live_creators;
+    const ytError = status?.credentials?.youtube_api_error;
 
     const wrap = el("div");
     const header = el("div", {
@@ -22,13 +23,15 @@ export async function renderCreators(root) {
         el("p", {
           text: liveReady
             ? "Search YouTube and add creators you edit for."
-            : "Demo creators are loaded. Connect YOUTUBE_API_KEY to add live channels.",
+            : ytError
+              ? `YouTube key issue: ${ytError}`
+              : "Demo creators are loaded. Connect a valid YOUTUBE_API_KEY to add live channels.",
         }),
       ]),
       el("button", {
         class: "btn btn-primary",
         text: "+ Add Creator",
-        onclick: () => openAddModal(() => renderCreators(root), liveReady),
+        onclick: () => openAddModal(() => renderCreators(root), liveReady, ytError || ""),
       })
     );
     wrap.append(header);
@@ -78,7 +81,7 @@ function meta(k, v) {
   ]);
 }
 
-function openAddModal(onDone, liveReady) {
+function openAddModal(onDone, liveReady, ytError = "") {
   const backdrop = el("div", { class: "modal-backdrop" });
   const input = el("input", {
     placeholder: "Search name, @handle, or paste a channel URL…",
@@ -94,7 +97,7 @@ function openAddModal(onDone, liveReady) {
     const q = input.value.trim();
     latestQuery = q;
     if (!liveReady) {
-      status.textContent = "YouTube API not connected — check Settings.";
+      status.textContent = ytError || "YouTube API not connected — check Settings.";
       results.replaceChildren();
       return;
     }
@@ -198,5 +201,5 @@ function openAddModal(onDone, liveReady) {
   backdrop.append(modal);
   document.body.append(backdrop);
   setTimeout(() => input.focus(), 50);
-  if (!liveReady) status.textContent = "YOUTUBE_API_KEY not connected — open Settings.";
+  if (!liveReady) status.textContent = ytError || "YOUTUBE_API_KEY not connected — open Settings.";
 }
