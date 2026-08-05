@@ -2,19 +2,23 @@ import { api } from "../api.js";
 import { navigate } from "../router.js";
 import { el, loading, error } from "../components/Sidebar.js";
 import { store } from "../store.js";
+import { bindLivePage } from "../live.js";
 
 export async function renderHome(root) {
-  const cached = store.get().home;
-  if (cached) paint(root, cached);
-  else root.replaceChildren(loading("Loading workspace…"));
-
-  try {
-    const data = await api.home();
-    store.setHome(data);
-    paint(root, data);
-  } catch (e) {
-    if (!cached) root.replaceChildren(error(e.message));
-  }
+  bindLivePage(root, async ({ silent }) => {
+    if (!silent) {
+      const cached = store.get().home;
+      if (cached) paint(root, cached);
+      else root.replaceChildren(loading("Loading workspace…"));
+    }
+    try {
+      const data = await api.home();
+      store.setHome(data);
+      paint(root, data);
+    } catch (e) {
+      if (!silent && !store.get().home) root.replaceChildren(error(e.message));
+    }
+  });
 }
 
 function paint(root, data) {

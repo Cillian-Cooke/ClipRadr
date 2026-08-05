@@ -17,6 +17,8 @@ const state = {
   busy: false,
   currentScanId: null,
   lastSyncAt: null,
+  dataRevision: 0,
+  lastDataChange: null,
 };
 
 const listeners = new Set();
@@ -185,5 +187,12 @@ export const store = {
     const done = Object.keys(state.scanDone).length;
     const pending = state.scanQueue.length + (state.currentScanId ? 1 : 0);
     return { done, pending, busy: state.busy, current: state.currentScanId };
+  },
+
+  bumpData(reason = "update") {
+    state.dataRevision = (state.dataRevision || 0) + 1;
+    state.lastDataChange = reason;
+    state.lastSyncAt = Date.now();
+    this.notify();
   },
 };

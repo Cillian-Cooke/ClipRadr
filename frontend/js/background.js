@@ -2,6 +2,7 @@
 
 import { api, withRetry } from "./api.js";
 import { store } from "./store.js";
+import { refreshWorkspace } from "./refresh.js";
 
 let started = false;
 let timer = null;
@@ -17,6 +18,8 @@ async function scanNext() {
   s.currentScanId = next;
   store.notify();
 
+  let creatorId = store.get().videoById?.[next]?.creator_id || null;
+
   try {
     const res = await withRetry(() => api.scanVideo(next, { sync: true }), {
       tries: 2,
@@ -31,9 +34,18 @@ async function scanNext() {
       } catch {
         /* cache later */
       }
+      try {
+        const video = await api.video(next);
+        store.setVideo(video);
+        creatorId = video.creator_id || video.creator?.id || creatorId;
+      } catch {
+        /* ignore */
+      }
     }
+    await refreshWorkspace({ creatorId });
   } catch (e) {
     store.markScanError(next, e.message);
+    store.bumpData("scan-error");
   } finally {
     store.get().busy = false;
     store.notify();
@@ -77,7 +89,6 @@ export async function afterCreatorAdded(res) {
 
   let videoIds = res?.video_ids || [];
 
-  // If import was empty/partial, try refresh once.
   if (res?.creator?.id && (!videoIds.length || res.import_error)) {
     try {
       await withRetry(() => api.refreshCreator(res.creator.id), { tries: 2, delayMs: 800 });
@@ -87,7 +98,7 @@ export async function afterCreatorAdded(res) {
         .filter((v) => v.scan_status !== "SCANNED")
         .map((v) => v.id);
     } catch {
-      /* keep going with whatever we have */
+      /* keep going */
     }
   } else if (res?.creator?.id) {
     try {
@@ -99,6 +110,7 @@ export async function afterCreatorAdded(res) {
   }
 
   store.enqueueScans(videoIds);
+  await refreshWorkspace({ creatorId: res?.creator?.id });
   kickBackgroundScans();
 }
 
@@ -130,6 +142,7 @@ export async function restoreFollowedCreators() {
           /* continue */
         }
       }
+      await refreshWorkspace();
       kickBackgroundScans();
       return { restored: 0, synced: serverList.length };
     }
@@ -154,6 +167,7 @@ export async function restoreFollowedCreators() {
         console.warn("restore failed", ch.handle || ch.youtube_channel_id, e.message);
       }
     }
+    await refreshWorkspace();
     return { restored };
   } finally {
     restoring = false;

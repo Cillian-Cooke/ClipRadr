@@ -3,25 +3,27 @@ import { navigate } from "../router.js";
 import { el, loading, error, empty } from "../components/Sidebar.js";
 import { store } from "../store.js";
 import { afterCreatorAdded } from "../background.js";
+import { bindLivePage } from "../live.js";
 
 export async function renderCreators(root) {
-  const cached = store.get().creators;
-  if (cached?.length) {
-    paint(root, cached, store.get().status);
-  } else {
-    root.replaceChildren(loading());
-  }
-  try {
-    const [data, status] = await Promise.all([
-      api.creators(),
-      api.status().catch(() => null),
-    ]);
-    store.setCreators(data.creators || []);
-    if (status) store.setStatus(status);
-    paint(root, data.creators || [], status);
-  } catch (e) {
-    if (!cached?.length) root.replaceChildren(error(e.message));
-  }
+  bindLivePage(root, async ({ silent }) => {
+    const cached = store.get().creators;
+    if (!silent) {
+      if (cached?.length) paint(root, cached, store.get().status);
+      else root.replaceChildren(loading());
+    }
+    try {
+      const [data, status] = await Promise.all([
+        api.creators(),
+        api.status().catch(() => null),
+      ]);
+      store.setCreators(data.creators || []);
+      if (status) store.setStatus(status);
+      paint(root, data.creators || [], status || store.get().status);
+    } catch (e) {
+      if (!silent && !cached?.length) root.replaceChildren(error(e.message));
+    }
+  });
 }
 
 function paint(root, creators, status) {
@@ -38,7 +40,7 @@ function paint(root, creators, status) {
       el("h1", { text: "Creators" }),
       el("p", {
         text: liveReady
-          ? "Your YouTube creators — videos keep scanning in the background as you browse."
+          ? "Your YouTube creators — pages update live as scans finish."
           : ytError
             ? `YouTube key issue: ${ytError}`
             : "Add creators once YouTube is connected in Settings.",
@@ -47,7 +49,7 @@ function paint(root, creators, status) {
     el("button", {
       class: "btn btn-primary",
       text: "+ Add Creator",
-      onclick: () => openAddModal(() => renderCreators(root), liveReady, ytError || ""),
+      onclick: () => openAddModal(() => store.bumpData("creator-added"), liveReady, ytError || ""),
     })
   );
   wrap.append(header);
@@ -166,7 +168,7 @@ function openAddModal(onDone, liveReady, ytError = "") {
                   backdrop.remove();
                   onDone();
                   if (res.creator?.id) navigate(`/creator/${res.creator.id}`);
-                }, 500);
+                }, 400);
               } catch (e) {
                 status.textContent = e.message || "Couldn’t add creator. Try again.";
                 results.querySelectorAll("button").forEach((b) => (b.disabled = false));

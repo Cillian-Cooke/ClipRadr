@@ -1,14 +1,20 @@
 import { api, formatTime } from "../api.js";
 import { navigate } from "../router.js";
 import { el, loading, error } from "../components/Sidebar.js";
+import { store } from "../store.js";
+import { bindLivePage } from "../live.js";
+import { kickBackgroundScans } from "../background.js";
+import { refreshWorkspace } from "../refresh.js";
 
 export async function renderCreator(root, id) {
-  root.replaceChildren(loading());
-  try {
-    await draw(root, id);
-  } catch (e) {
-    root.replaceChildren(error(e.message));
-  }
+  bindLivePage(root, async ({ silent }) => {
+    if (!silent) root.replaceChildren(loading());
+    try {
+      await draw(root, id);
+    } catch (e) {
+      if (!silent) root.replaceChildren(error(e.message));
+    }
+  });
 }
 
 async function draw(root, id) {
@@ -17,6 +23,7 @@ async function draw(root, id) {
     api.creatorVideos(id),
     api.status().catch(() => null),
   ]);
+  store.setCreatorVideos(id, videosRes.videos || []);
   const liveReady = status?.credentials?.youtube_api_key;
   const wrap = el("div");
 
@@ -31,7 +38,7 @@ async function draw(root, id) {
           e.currentTarget.textContent = "Refreshing…";
           try {
             await api.refreshCreator(id);
-            await draw(root, id);
+            await refreshWorkspace({ creatorId: id });
           } catch (err) {
             alert(err.message);
             e.currentTarget.disabled = false;
@@ -44,11 +51,18 @@ async function draw(root, id) {
         text: "Scan comments",
         onclick: async (e) => {
           e.currentTarget.disabled = true;
-          e.currentTarget.textContent = "Scanning…";
+          e.currentTarget.textContent = "Queuing…";
           try {
-            const res = await api.scanCreator(id);
-            alert(res.message || "Scan started.");
-            await draw(root, id);
+            const vids = (videosRes.videos || [])
+              .filter((v) => !v.is_demo)
+              .map((v) => v.id);
+            store.enqueueScans(vids, { front: true });
+            kickBackgroundScans();
+            e.currentTarget.textContent = "Scan queued";
+            setTimeout(() => {
+              e.currentTarget.disabled = false;
+              e.currentTarget.textContent = "Scan comments";
+            }, 1200);
           } catch (err) {
             alert(err.message);
             e.currentTarget.disabled = false;
@@ -96,7 +110,7 @@ async function draw(root, id) {
         el("p", {
           class: "muted",
           style: "margin:8px 0 0;",
-          text: "Set YOUTUBE_API_KEY in .env to refresh videos and scan comments for this creator.",
+          text: "Set YOUTUBE_API_KEY to refresh videos and scan comments for this creator.",
         }),
       ])
     );
@@ -154,9 +168,13 @@ async function draw(root, id) {
           onclick: async (e) => {
             e.currentTarget.disabled = true;
             try {
-              const res = await api.scanVideo(v.id);
-              alert(res.message);
-              await draw(root, id);
+              store.enqueueScans([v.id], { front: true });
+              kickBackgroundScans();
+              e.currentTarget.textContent = "Queued";
+              setTimeout(() => {
+                e.currentTarget.disabled = false;
+                e.currentTarget.textContent = v.scan_status === "SCANNED" ? "Rescan" : "Scan";
+              }, 1000);
             } catch (err) {
               alert(err.message);
               e.currentTarget.disabled = false;
