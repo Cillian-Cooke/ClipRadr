@@ -155,7 +155,25 @@
   padding: 0;
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-height: 0;
+}
+
+.content.workspace > * {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.main-no-topbar {
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+}
+
+.main-no-topbar .content.workspace {
+  height: 100%;
 }
 
 @media (max-width: 1024px) {

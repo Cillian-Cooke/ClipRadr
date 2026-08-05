@@ -9,7 +9,11 @@ const NAV = [
   { href: "/saved", label: "Saved Clips", icon: "★" },
 ];
 
-export function renderShell(activePath, contentNode, { topbarExtra = null, contentClass = "" } = {}) {
+export function renderShell(
+  activePath,
+  contentNode,
+  { topbarExtra = null, contentClass = "", hideTopbar = false } = {}
+) {
   const app = document.getElementById("app");
   app.replaceChildren();
 
@@ -83,26 +87,29 @@ export function renderShell(activePath, contentNode, { topbarExtra = null, conte
   );
   sidebar.append(footer);
 
-  const main = el("main", { class: "main" });
-  const topbar = el("div", { class: "topbar" });
-  const searchWrap = el("div", { class: "search-wrap" });
-  const search = el("input", {
-    type: "search",
-    placeholder: "Search creators, videos, moments, topics…",
-  });
-  search.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && search.value.trim()) {
-      navigate(`/search?q=${encodeURIComponent(search.value.trim())}`);
-    }
-  });
-  searchWrap.append(search);
-  topbar.append(searchWrap);
-  if (topbarExtra) topbar.append(topbarExtra);
-
+  const main = el("main", { class: `main${hideTopbar ? " main-no-topbar" : ""}` });
   const content = el("div", { class: `content ${contentClass}`.trim() });
   content.append(contentNode);
 
-  main.append(topbar, content);
+  if (!hideTopbar) {
+    const topbar = el("div", { class: "topbar" });
+    const searchWrap = el("div", { class: "search-wrap" });
+    const search = el("input", {
+      type: "search",
+      placeholder: "Search creators, videos, moments, topics…",
+    });
+    search.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && search.value.trim()) {
+        navigate(`/search?q=${encodeURIComponent(search.value.trim())}`);
+      }
+    });
+    searchWrap.append(search);
+    topbar.append(searchWrap);
+    if (topbarExtra) topbar.append(topbarExtra);
+    main.append(topbar);
+  }
+
+  main.append(content);
   shell.append(sidebar, main);
   app.append(shell);
 }

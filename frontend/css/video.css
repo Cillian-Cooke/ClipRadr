@@ -1,8 +1,8 @@
 .video-workspace {
   display: grid;
   grid-template-columns: 1fr 320px;
-  height: calc(100vh - 57px);
-  min-height: 600px;
+  height: 100%;
+  min-height: 0;
   background: var(--bg);
 }
 
@@ -41,7 +41,7 @@
 /* True 16:9 stage — width shrinks when max-height caps height (YouTube / export ratio). */
 .player-frame,
 .ratio-16x9 {
-  --player-max-h: min(52vh, 620px);
+  --player-max-h: min(58vh, 680px);
   position: relative;
   width: min(100%, calc(var(--player-max-h) * 16 / 9));
   max-width: 100%;

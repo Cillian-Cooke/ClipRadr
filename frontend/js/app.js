@@ -30,7 +30,7 @@ route("/creators", () => mount("/creators", renderCreators));
 route("/creator/:id", ({ id }) => mount("/creators", (root) => renderCreator(root, id)));
 route("/video/:id", ({ id }) => {
   const root = el("div");
-  renderShell(`/video/${id}`, root, { contentClass: "workspace" });
+  renderShell(`/video/${id}`, root, { contentClass: "workspace", hideTopbar: true });
   renderVideo(root, id);
 });
 route("/clips", () => mount("/clips", renderClips));
