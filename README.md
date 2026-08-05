@@ -66,9 +66,10 @@ This repo is set up as a FastAPI app (`backend.main:app` in `pyproject.toml`).
 1. Import **Cillian-Cooke/ClipRadar** in Vercel (Framework: FastAPI, Root: `./`).
 2. In **Settings → Environment Variables**, add:
    - `YOUTUBE_API_KEY` = your key (needed for live search/add/scan)
+   - Optional but recommended: `DATABASE_URL` = a Neon/Postgres connection string (keeps creators across cold starts). Without it, ClipRadar still remembers followed channels in the browser and re-imports them automatically.
 3. Redeploy.
 
-**What works on Vercel:** browsing the demo library, YouTube channel search/add, importing videos, scanning **one video at a time** from the UI.
+**What works on Vercel:** browsing, YouTube channel search/add, importing ~10 recent videos, background comment scanning while you navigate (sidebar shows progress), client-side cache of creators/videos/moments.
 
-**Limits:** SQLite is ephemeral (`/tmp`) — data resets on cold starts. Background multi-video scans are disabled; FFmpeg export needs local/demo media and may not fit serverless. For a durable production DB, point `DATABASE_URL` at Postgres (e.g. Neon).
+**Limits:** Without `DATABASE_URL`, server SQLite is ephemeral — the browser restores your followed channels on load. FFmpeg export needs local/demo media and may not fit serverless.
 

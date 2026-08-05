@@ -11,7 +11,6 @@ from backend.config import settings
 def _ensure_sqlite_parent(url: str) -> None:
     if not url.startswith("sqlite:///"):
         return
-    # sqlite:////tmp/... (4 slashes) or sqlite:///relative (3)
     raw = url.removeprefix("sqlite:///")
     path = Path(raw)
     if not path.is_absolute():
@@ -19,10 +18,18 @@ def _ensure_sqlite_parent(url: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
-_ensure_sqlite_parent(settings.database_url)
+def _normalize_database_url(url: str) -> str:
+    # Neon / Vercel often provide postgres:// — SQLAlchemy wants postgresql://
+    if url.startswith("postgres://"):
+        return "postgresql://" + url[len("postgres://") :]
+    return url
 
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-engine = create_engine(settings.database_url, connect_args=connect_args)
+
+db_url = _normalize_database_url(settings.database_url)
+_ensure_sqlite_parent(db_url)
+
+connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
+engine = create_engine(db_url, connect_args=connect_args, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

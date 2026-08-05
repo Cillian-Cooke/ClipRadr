@@ -101,6 +101,11 @@
   background: var(--bg-elevated);
 }
 
+.demo-pill.scanning {
+  color: var(--accent, #0f6b4c);
+  border-color: color-mix(in srgb, var(--accent, #0f6b4c) 40%, var(--border-subtle));
+}
+
 .main {
   min-width: 0;
   min-height: 100vh;

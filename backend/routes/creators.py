@@ -123,18 +123,36 @@ def add_creator(body: AddCreatorBody, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(creator)
 
+    video_rows = (
+        db.query(models.Video)
+        .filter_by(creator_id=creator.id, is_demo=0)
+        .order_by(models.Video.published_at.desc())
+        .all()
+    )
+    video_ids = [v.id for v in video_rows]
+
+    # On Vercel, browser background worker scans videos (threads don't survive).
+    # Locally, optional server-side async still available when auto_scan and not Vercel.
+    from backend.config import IS_VERCEL
+
     should_scan = settings.auto_scan_on_add if body.auto_scan is None else body.auto_scan
     scan_started = False
-    if should_scan and added_videos:
+    if should_scan and video_ids and not IS_VERCEL:
         _run_scan_creator_async(creator.id)
         scan_started = True
 
     vc, mc = _counts(db, creator.id)
     return {
-        "message": "Creator added." + (" Scanning comments in the background…" if scan_started else ""),
+        "message": (
+            "Creator added. Videos will scan in the background as you browse…"
+            if video_ids
+            else "Creator added."
+        ),
         "creator": creator_to_dict(creator, video_count=vc, moment_count=mc),
         "videos_imported": added_videos,
+        "video_ids": video_ids,
         "scan_started": scan_started,
+        "client_should_scan": bool(video_ids),
     }
 
 

@@ -11,6 +11,12 @@ import { renderSaved } from "./pages/saved.js";
 import { renderSearch } from "./pages/search.js";
 import { renderSettings } from "./pages/settings.js";
 import { renderVideosIndex } from "./pages/videos.js";
+import { store } from "./store.js";
+import {
+  startBackgroundWorker,
+  restoreFollowedCreators,
+  kickBackgroundScans,
+} from "./background.js";
 
 function mount(path, renderer) {
   const root = el("div");
@@ -33,7 +39,23 @@ route("/videos", () => mount("/videos", renderVideosIndex));
 route("/settings", () => mount("/settings", renderSettings));
 route("/search", () => mount("/search", renderSearch));
 
-dispatch();
+async function boot() {
+  startBackgroundWorker();
+  try {
+    const status = await api.status();
+    store.setStatus(status);
+  } catch {
+    /* offline-ish */
+  }
+  try {
+    await restoreFollowedCreators();
+  } catch (e) {
+    console.warn("restore failed", e);
+  }
+  kickBackgroundScans();
+  dispatch();
+}
 
-// Expose helpers for debugging in demo
-window.ClipRadar = { api, navigate, formatTime };
+boot();
+
+window.ClipRadar = { api, navigate, formatTime, store };

@@ -1,76 +1,89 @@
 import { api } from "../api.js";
 import { navigate } from "../router.js";
 import { el, loading, error, empty } from "../components/Sidebar.js";
+import { store } from "../store.js";
+import { afterCreatorAdded } from "../background.js";
 
 export async function renderCreators(root) {
-  root.replaceChildren(loading());
+  const cached = store.get().creators;
+  if (cached?.length) {
+    paint(root, cached, store.get().status);
+  } else {
+    root.replaceChildren(loading());
+  }
   try {
     const [data, status] = await Promise.all([
       api.creators(),
       api.status().catch(() => null),
     ]);
-    const liveReady = !!status?.capabilities?.add_live_creators;
-    const ytError = status?.credentials?.youtube_api_error;
-
-    const wrap = el("div");
-    const header = el("div", {
-      class: "page-header",
-      style: "display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;",
-    });
-    header.append(
-      el("div", {}, [
-        el("h1", { text: "Creators" }),
-        el("p", {
-          text: liveReady
-            ? "Your YouTube creators — search and add more anytime."
-            : ytError
-              ? `YouTube key issue: ${ytError}`
-              : "Add creators once YouTube is connected in Settings.",
-        }),
-      ]),
-      el("button", {
-        class: "btn btn-primary",
-        text: "+ Add Creator",
-        onclick: () => openAddModal(() => renderCreators(root), liveReady, ytError || ""),
-      })
-    );
-    wrap.append(header);
-
-    if (!data.creators.length) {
-      wrap.append(empty("No creators yet. Click Add Creator to import a channel."));
-      root.replaceChildren(wrap);
-      return;
-    }
-
-    const grid = el("div", { class: "creator-grid" });
-    for (const c of data.creators) {
-      grid.append(
-        el("div", { class: "creator-card" }, [
-          el("div", { class: "creator-card-head" }, [
-            el("img", { class: "avatar", src: c.thumbnail_url || "/static/avatars/chaos.svg", alt: c.name }),
-            el("div", {}, [
-              el("h3", { text: c.name }),
-              el("div", { class: "muted", text: c.handle }),
-            ]),
-          ]),
-          el("div", { class: "creator-meta" }, [
-            meta("Videos", c.video_count),
-            meta("Clip opportunities", c.clip_opportunities),
-            meta("Last scanned", c.last_scanned_at ? "Recently" : "—"),
-          ]),
-          el("button", {
-            class: "btn",
-            text: "Open Creator",
-            onclick: () => navigate(`/creator/${c.id}`),
-          }),
-        ])
-      );
-    }
-    wrap.append(grid);
-    root.replaceChildren(wrap);
+    store.setCreators(data.creators || []);
+    if (status) store.setStatus(status);
+    paint(root, data.creators || [], status);
   } catch (e) {
-    root.replaceChildren(error(e.message));
+    if (!cached?.length) root.replaceChildren(error(e.message));
   }
+}
+
+function paint(root, creators, status) {
+  const liveReady = !!status?.capabilities?.add_live_creators;
+  const ytError = status?.credentials?.youtube_api_error;
+
+  const wrap = el("div");
+  const header = el("div", {
+    class: "page-header",
+    style: "display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;",
+  });
+  header.append(
+    el("div", {}, [
+      el("h1", { text: "Creators" }),
+      el("p", {
+        text: liveReady
+          ? "Your YouTube creators — videos keep scanning in the background as you browse."
+          : ytError
+            ? `YouTube key issue: ${ytError}`
+            : "Add creators once YouTube is connected in Settings.",
+      }),
+    ]),
+    el("button", {
+      class: "btn btn-primary",
+      text: "+ Add Creator",
+      onclick: () => openAddModal(() => renderCreators(root), liveReady, ytError || ""),
+    })
+  );
+  wrap.append(header);
+
+  if (!creators.length) {
+    wrap.append(empty("No creators yet. Click Add Creator to import a channel."));
+    root.replaceChildren(wrap);
+    return;
+  }
+
+  const grid = el("div", { class: "creator-grid" });
+  for (const c of creators) {
+    grid.append(
+      el("div", { class: "creator-card" }, [
+        el("div", { class: "creator-card-head" }, [
+          el("img", { class: "avatar", src: c.thumbnail_url || "/static/avatars/chaos.svg", alt: c.name }),
+          el("div", {}, [
+            el("h3", { text: c.name }),
+            el("div", { class: "muted", text: c.handle }),
+          ]),
+        ]),
+        el("div", { class: "creator-meta" }, [
+          meta("Videos", c.video_count),
+          meta("Clip opportunities", c.clip_opportunities),
+          meta("Last scanned", c.last_scanned_at ? "Recently" : "—"),
+        ]),
+        el("button", {
+          class: "btn",
+          text: "Open Creator",
+          onclick: () => navigate(`/creator/${c.id}`),
+        }),
+      ])
+    );
+  }
+  wrap.append(grid);
+  root.replaceChildren(wrap);
 }
 
 function meta(k, v) {
@@ -125,11 +138,14 @@ function openAddModal(onDone, liveReady, ytError = "") {
               try {
                 const res = await api.addCreator({
                   youtube_channel_id: ch.youtube_channel_id,
-                  auto_scan: true,
+                  auto_scan: false,
                 });
+                await afterCreatorAdded(res);
                 status.textContent =
                   (res.message || "Creator added.") +
-                  (res.videos_imported ? ` Imported ${res.videos_imported} videos.` : "");
+                  (res.videos_imported
+                    ? ` Imported ${res.videos_imported} videos — scanning in background.`
+                    : "");
                 setTimeout(() => {
                   backdrop.remove();
                   onDone();
@@ -152,7 +168,8 @@ function openAddModal(onDone, liveReady, ytError = "") {
               ch.description
                 ? el("div", {
                     class: "dim",
-                    style: "font-size:11px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:320px;",
+                    style:
+                      "font-size:11px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:320px;",
                     text: ch.description,
                   })
                 : null,
@@ -183,7 +200,7 @@ function openAddModal(onDone, liveReady, ytError = "") {
   const modal = el("div", { class: "modal modal-wide" }, [
     el("h2", { text: "Add Creator" }),
     el("p", {
-      text: "Search YouTube by creator name or paste a channel URL. Videos import automatically; comments scan in the background.",
+      text: "Search YouTube by creator name or paste a channel URL. Videos import immediately; comments keep scanning while you browse other pages.",
     }),
     el("label", { text: "Search YouTube" }),
     input,

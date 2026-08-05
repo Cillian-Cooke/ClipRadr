@@ -47,8 +47,10 @@ export const api = {
   status: () => request("/api/status"),
   scanCreator: (id) => request(`/api/creators/${id}/scan`, { method: "POST" }),
   refreshCreator: (id) => request(`/api/creators/${id}/refresh`, { method: "POST" }),
-  scanVideo: (id) => request(`/api/videos/${id}/scan`, { method: "POST" }),
+  scanVideo: (id, { sync = false } = {}) =>
+    request(`/api/videos/${id}/scan${sync ? "?sync=1" : ""}`, { method: "POST" }),
 };
+
 
 export function formatTime(seconds) {
   seconds = Math.max(0, Math.floor(Number(seconds) || 0));

@@ -69,8 +69,10 @@ export async function renderSearch(root) {
                 try {
                   const res = await api.addCreator({
                     youtube_channel_id: ch.youtube_channel_id,
-                    auto_scan: true,
+                    auto_scan: false,
                   });
+                  const { afterCreatorAdded } = await import("../background.js");
+                  await afterCreatorAdded(res);
                   navigate(`/creator/${res.creator.id}`);
                 } catch (err) {
                   alert(err.message);

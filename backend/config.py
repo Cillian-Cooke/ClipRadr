@@ -35,8 +35,8 @@ class Settings(BaseSettings):
     similarity_threshold: float = 0.78
     # Keep serverless requests short — scan videos one-at-a-time from the UI
     max_comments_per_video: int = 200 if IS_VERCEL else 1000
-    recent_videos_limit: int = 8 if IS_VERCEL else 20
-    auto_scan_on_add: bool = False if IS_VERCEL else True
+    recent_videos_limit: int = 10 if IS_VERCEL else 20
+    auto_scan_on_add: bool = True
 
 
 settings = Settings()

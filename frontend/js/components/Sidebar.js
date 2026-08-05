@@ -1,4 +1,5 @@
 import { navigate } from "../router.js";
+import { store } from "../store.js";
 
 const NAV = [
   { href: "/home", label: "Home", icon: "⌂" },
@@ -44,7 +45,23 @@ export function renderShell(activePath, contentNode, { topbarExtra = null, conte
   sidebar.append(nav);
 
   const footer = el("div", { class: "sidebar-footer" });
-  footer.append(el("div", { class: "demo-pill", text: "Demo Mode" }));
+  const scanPill = el("div", { class: "demo-pill", text: "Idle" });
+  const updatePill = () => {
+    const { pending, busy, done } = store.scanProgress();
+    if (busy || pending > 0) {
+      scanPill.textContent = `Scanning ${pending} video${pending === 1 ? "" : "s"}…`;
+      scanPill.classList.add("scanning");
+    } else if (done > 0) {
+      scanPill.textContent = `${done} scanned · cached`;
+      scanPill.classList.remove("scanning");
+    } else {
+      scanPill.textContent = "Ready";
+      scanPill.classList.remove("scanning");
+    }
+  };
+  updatePill();
+  store.subscribe(updatePill);
+  footer.append(scanPill);
   footer.append(
     el("a", { href: "/settings", "data-link": "1", class: activePath === "/settings" ? "active" : "" }, [
       el("span", { class: "nav-icon", text: "⚙" }),
@@ -76,6 +93,7 @@ export function renderShell(activePath, contentNode, { topbarExtra = null, conte
   shell.append(sidebar, main);
   app.append(shell);
 }
+
 
 export function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
