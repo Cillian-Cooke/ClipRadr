@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.config import ROOT_DIR, settings
+from backend.config import IS_VERCEL, ROOT_DIR, settings
 from backend.database.database import Base, SessionLocal, engine
 from backend.database import models  # noqa: F401
 from backend.routes import clips, creators, exports, home, moments, search, videos, youtube_search
@@ -73,11 +73,16 @@ def create_app() -> FastAPI:
                 "auto_scan_on_add": settings.auto_scan_on_add,
             },
             "setup": {
-                "env_file": str(ROOT_DIR / ".env"),
+                "env_file": "Vercel project env" if IS_VERCEL else str(ROOT_DIR / ".env"),
+                "platform": "vercel" if IS_VERCEL else "local",
                 "hint": (
-                    "Set YOUTUBE_API_KEY in .env and restart to enable live creators."
-                    if not api_configured()
-                    else "YouTube API connected. Add a creator URL to import + scan."
+                    "Set YOUTUBE_API_KEY in Vercel → Settings → Environment Variables."
+                    if IS_VERCEL and not api_configured()
+                    else (
+                        "Set YOUTUBE_API_KEY in .env and restart to enable live creators."
+                        if not api_configured()
+                        else "YouTube API connected. Add a creator URL to import + scan."
+                    )
                 ),
             },
         }

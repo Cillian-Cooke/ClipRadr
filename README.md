@@ -58,3 +58,17 @@ AUTO_SCAN_ON_ADD=true
 7. Open a video → timeline moments appear when the scan finishes. Use **Scan** / **Rescan** on a video card if needed.
 
 Clip export still uses local/authorized source media (demo VOD or uploaded file) — the YouTube API is for discovery + comments only.
+
+## Deploy on Vercel
+
+This repo is set up as a FastAPI app (`backend.main:app` in `pyproject.toml`).
+
+1. Import **Cillian-Cooke/ClipRadar** in Vercel (Framework: FastAPI, Root: `./`).
+2. In **Settings → Environment Variables**, add:
+   - `YOUTUBE_API_KEY` = your key (needed for live search/add/scan)
+3. Redeploy.
+
+**What works on Vercel:** browsing the demo library, YouTube channel search/add, importing videos, scanning **one video at a time** from the UI.
+
+**Limits:** SQLite is ephemeral (`/tmp`) — data resets on cold starts. Background multi-video scans are disabled; FFmpeg export needs local/demo media and may not fit serverless. For a durable production DB, point `DATABASE_URL` at Postgres (e.g. Neon).
+

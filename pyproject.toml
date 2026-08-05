@@ -1,0 +1,9 @@
+[project]
+name = "clipradar"
+version = "0.1.0"
+description = "Audience-powered clip discovery for YouTube long-form VODs"
+requires-python = ">=3.11"
+readme = "README.md"
+
+[tool.vercel]
+entrypoint = "backend.main:app"
