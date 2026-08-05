@@ -101,7 +101,6 @@ def add_creator(body: AddCreatorBody, db: Session = Depends(get_db)):
         db.add(creator)
         db.flush()
     else:
-        # Refresh metadata from live API
         for key, value in info.items():
             setattr(creator, key, value)
 
@@ -113,16 +112,23 @@ def add_creator(body: AddCreatorBody, db: Session = Depends(get_db)):
     if not link:
         db.add(models.UserCreator(user_id=user.id, creator_id=creator.id))
 
-    added_videos = 0
-    try:
-        added_videos = import_creator_videos(db, creator)
-    except YouTubeAPIError as exc:
-        db.commit()
-        raise HTTPException(400, f"Creator saved, but video import failed: {exc}") from exc
-
+    # Persist creator immediately so a later video-import timeout doesn't lose the follow.
     db.commit()
     db.refresh(creator)
 
+    import_error = None
+    added_videos = 0
+    try:
+        added_videos = import_creator_videos(db, creator)
+        db.commit()
+    except YouTubeAPIError as exc:
+        db.rollback()
+        import_error = str(exc)
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        import_error = f"Video import failed: {exc}"
+
+    db.refresh(creator)
     video_rows = (
         db.query(models.Video)
         .filter_by(creator_id=creator.id, is_demo=0)
@@ -131,8 +137,6 @@ def add_creator(body: AddCreatorBody, db: Session = Depends(get_db)):
     )
     video_ids = [v.id for v in video_rows]
 
-    # On Vercel, browser background worker scans videos (threads don't survive).
-    # Locally, optional server-side async still available when auto_scan and not Vercel.
     from backend.config import IS_VERCEL
 
     should_scan = settings.auto_scan_on_add if body.auto_scan is None else body.auto_scan
@@ -142,17 +146,24 @@ def add_creator(body: AddCreatorBody, db: Session = Depends(get_db)):
         scan_started = True
 
     vc, mc = _counts(db, creator.id)
+    if import_error and not video_ids:
+        message = f"Creator saved, but videos didn’t import yet: {import_error}"
+    elif import_error:
+        message = f"Creator saved with {len(video_ids)} videos. Partial import: {import_error}"
+    elif video_ids:
+        message = "Creator added. Videos will scan in the background as you browse…"
+    else:
+        message = "Creator added. Importing videos next…"
+
     return {
-        "message": (
-            "Creator added. Videos will scan in the background as you browse…"
-            if video_ids
-            else "Creator added."
-        ),
+        "message": message,
         "creator": creator_to_dict(creator, video_count=vc, moment_count=mc),
         "videos_imported": added_videos,
         "video_ids": video_ids,
         "scan_started": scan_started,
         "client_should_scan": bool(video_ids),
+        "import_error": import_error,
+        "ok": True,
     }
 
 

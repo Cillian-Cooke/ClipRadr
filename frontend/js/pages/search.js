@@ -1,4 +1,4 @@
-import { api } from "../api.js";
+import { api, withRetry } from "../api.js";
 import { navigate } from "../router.js";
 import { el, loading, error, empty } from "../components/Sidebar.js";
 
@@ -67,10 +67,14 @@ export async function renderSearch(root) {
                 btn.disabled = true;
                 btn.textContent = "Adding…";
                 try {
-                  const res = await api.addCreator({
-                    youtube_channel_id: ch.youtube_channel_id,
-                    auto_scan: false,
-                  });
+                  const res = await withRetry(
+                    () =>
+                      api.addCreator({
+                        youtube_channel_id: ch.youtube_channel_id,
+                        auto_scan: false,
+                      }),
+                    { tries: 3, delayMs: 900, label: "Add creator" }
+                  );
                   const { afterCreatorAdded } = await import("../background.js");
                   await afterCreatorAdded(res);
                   navigate(`/creator/${res.creator.id}`);

@@ -45,11 +45,31 @@ export const api = {
   exportClip: (body) => request("/api/export", { method: "POST", body: JSON.stringify(body) }),
   exportStatus: (id) => request(`/api/export/${id}`),
   status: () => request("/api/status"),
+  statusCheck: () => request("/api/status?check_youtube=1"),
   scanCreator: (id) => request(`/api/creators/${id}/scan`, { method: "POST" }),
   refreshCreator: (id) => request(`/api/creators/${id}/refresh`, { method: "POST" }),
   scanVideo: (id, { sync = false } = {}) =>
     request(`/api/videos/${id}/scan${sync ? "?sync=1" : ""}`, { method: "POST" }),
 };
+
+export async function withRetry(fn, { tries = 3, delayMs = 700, label = "Request" } = {}) {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      const msg = String(e?.message || e);
+      const retryable =
+        /failed to fetch|network|timeout|502|503|504|cloudflare|temporar|econnreset|socket/i.test(
+          msg
+        );
+      if (!retryable || i === tries - 1) break;
+      await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+    }
+  }
+  throw lastErr || new Error(`${label} failed`);
+}
 
 
 export function formatTime(seconds) {

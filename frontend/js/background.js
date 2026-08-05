@@ -1,10 +1,11 @@
 /** Global background scanner — keeps running across page navigations. */
 
-import { api } from "./api.js";
+import { api, withRetry } from "./api.js";
 import { store } from "./store.js";
 
 let started = false;
 let timer = null;
+let restoring = false;
 
 async function scanNext() {
   const s = store.get();
@@ -17,7 +18,11 @@ async function scanNext() {
   store.notify();
 
   try {
-    const res = await api.scanVideo(next, { sync: true });
+    const res = await withRetry(() => api.scanVideo(next, { sync: true }), {
+      tries: 2,
+      delayMs: 900,
+      label: "Scan",
+    });
     store.markScanned(next);
     if (res?.moments != null || res?.status === "SCANNED") {
       try {
@@ -39,7 +44,7 @@ function tick() {
   scanNext().finally(() => {
     const { pending } = store.scanProgress();
     if (pending > 0) {
-      timer = setTimeout(tick, 400);
+      timer = setTimeout(tick, 500);
     } else {
       timer = null;
     }
@@ -69,16 +74,20 @@ export async function afterCreatorAdded(res) {
     const creators = store.get().creators.filter((c) => c.id !== res.creator.id);
     store.setCreators([res.creator, ...creators]);
   }
+
   let videoIds = res?.video_ids || [];
-  if (!videoIds.length && res?.creator?.id) {
+
+  // If import was empty/partial, try refresh once.
+  if (res?.creator?.id && (!videoIds.length || res.import_error)) {
     try {
+      await withRetry(() => api.refreshCreator(res.creator.id), { tries: 2, delayMs: 800 });
       const vids = await api.creatorVideos(res.creator.id);
       store.setCreatorVideos(res.creator.id, vids.videos || []);
       videoIds = (vids.videos || [])
         .filter((v) => v.scan_status !== "SCANNED")
         .map((v) => v.id);
     } catch {
-      videoIds = [];
+      /* keep going with whatever we have */
     }
   } else if (res?.creator?.id) {
     try {
@@ -88,54 +97,65 @@ export async function afterCreatorAdded(res) {
       /* ignore */
     }
   }
+
   store.enqueueScans(videoIds);
   kickBackgroundScans();
 }
 
 /** Re-import followed channels if the server forgot them (Vercel /tmp SQLite). */
 export async function restoreFollowedCreators() {
-  let server;
+  if (restoring) return { restored: 0 };
+  restoring = true;
   try {
-    server = await api.creators();
-  } catch {
-    return { restored: 0 };
-  }
+    let server;
+    try {
+      server = await api.creators();
+    } catch {
+      return { restored: 0 };
+    }
 
-  const serverList = server.creators || [];
-  if (serverList.length) {
-    store.setCreators(serverList);
-    // Queue unscanned videos for each creator
-    for (const c of serverList) {
+    const serverList = server.creators || [];
+    if (serverList.length) {
+      store.setCreators(serverList);
+      for (const c of serverList) {
+        store.rememberChannel(c);
+        try {
+          const vids = await api.creatorVideos(c.id);
+          store.setCreatorVideos(c.id, vids.videos || []);
+          const need = (vids.videos || [])
+            .filter((v) => v.scan_status !== "SCANNED" && v.scan_status !== "SCANNING")
+            .map((v) => v.id);
+          store.enqueueScans(need);
+        } catch {
+          /* continue */
+        }
+      }
+      kickBackgroundScans();
+      return { restored: 0, synced: serverList.length };
+    }
+
+    const followed = store.get().followedChannels || [];
+    if (!followed.length) return { restored: 0 };
+
+    let restored = 0;
+    for (const ch of followed) {
       try {
-        const vids = await api.creatorVideos(c.id);
-        store.setCreatorVideos(c.id, vids.videos || []);
-        const need = (vids.videos || [])
-          .filter((v) => v.scan_status !== "SCANNED" && v.scan_status !== "SCANNING")
-          .map((v) => v.id);
-        store.enqueueScans(need);
-      } catch {
-        /* continue */
+        const res = await withRetry(
+          () =>
+            api.addCreator({
+              youtube_channel_id: ch.youtube_channel_id,
+              auto_scan: false,
+            }),
+          { tries: 3, delayMs: 900, label: "Restore creator" }
+        );
+        restored += 1;
+        await afterCreatorAdded(res);
+      } catch (e) {
+        console.warn("restore failed", ch.handle || ch.youtube_channel_id, e.message);
       }
     }
-    kickBackgroundScans();
-    return { restored: 0, synced: serverList.length };
+    return { restored };
+  } finally {
+    restoring = false;
   }
-
-  const followed = store.get().followedChannels || [];
-  if (!followed.length) return { restored: 0 };
-
-  let restored = 0;
-  for (const ch of followed) {
-    try {
-      const res = await api.addCreator({
-        youtube_channel_id: ch.youtube_channel_id,
-        auto_scan: false,
-      });
-      restored += 1;
-      await afterCreatorAdded(res);
-    } catch (e) {
-      console.warn("restore failed", ch.handle || ch.youtube_channel_id, e.message);
-    }
-  }
-  return { restored };
 }

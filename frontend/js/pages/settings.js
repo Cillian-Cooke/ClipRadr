@@ -4,7 +4,7 @@ import { el, loading, error } from "../components/Sidebar.js";
 export async function renderSettings(root) {
   root.replaceChildren(loading());
   try {
-    const status = await api.status();
+    const status = await api.statusCheck();
     const ytPresent = status.credentials.youtube_api_key;
     const ytOk = !!status.credentials.youtube_api_valid;
     const ytError = status.credentials.youtube_api_error;

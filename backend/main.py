@@ -49,21 +49,27 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/api/status")
-    def status():
+    def status(check_youtube: bool = False):
         from backend.services.ffmpeg import ffmpeg_available
         from backend.services.youtube import api_configured, probe_api_key
 
-        yt_probe = probe_api_key()
-        yt_ok = bool(yt_probe.get("valid"))
+        configured = api_configured()
+        yt_ok = configured
+        yt_error = None
+        # Live probe only when explicitly requested (Settings) — keeps Add/Search snappy.
+        if check_youtube and configured:
+            yt_probe = probe_api_key()
+            yt_ok = bool(yt_probe.get("valid"))
+            yt_error = yt_probe.get("error")
 
-        if not yt_probe.get("configured"):
+        if not configured:
             hint = (
                 "Set YOUTUBE_API_KEY in Vercel → Project Settings → Environment Variables, then redeploy."
                 if IS_VERCEL
                 else "Set YOUTUBE_API_KEY in .env and restart to enable live creators."
             )
-        elif not yt_ok:
-            hint = yt_probe.get("error") or "YouTube API key is set but invalid."
+        elif check_youtube and not yt_ok:
+            hint = yt_error or "YouTube API key is set but invalid."
         else:
             hint = "YouTube API connected. Add a creator to import + scan."
 
@@ -71,14 +77,14 @@ def create_app() -> FastAPI:
             "app": "ClipRadar",
             "demo_mode": settings.demo_mode,
             "credentials": {
-                "youtube_api_key": api_configured(),
-                "youtube_api_valid": yt_ok,
-                "youtube_api_error": yt_probe.get("error"),
+                "youtube_api_key": configured,
+                "youtube_api_valid": yt_ok if check_youtube else configured,
+                "youtube_api_error": yt_error,
                 "openai_api_key": bool(settings.openai_api_key and settings.openai_api_key.strip()),
             },
             "capabilities": {
-                "add_live_creators": yt_ok,
-                "scan_comments": yt_ok,
+                "add_live_creators": configured,
+                "scan_comments": configured,
                 "export_clips": ffmpeg_available(),
                 "semantic_embeddings": "local",
             },

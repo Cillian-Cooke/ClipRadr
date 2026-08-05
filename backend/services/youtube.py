@@ -98,14 +98,32 @@ def _friendly_error(resp: httpx.Response) -> YouTubeAPIError:
         return YouTubeAPIError(resp.text or f"YouTube API error ({resp.status_code})", status_code=resp.status_code)
 
 
-def _get(path: str, params: dict[str, Any]) -> dict:
+def _get(path: str, params: dict[str, Any], *, retries: int = 2) -> dict:
     key = _require_key()
     params = {**params, "key": key}
-    with httpx.Client(timeout=45.0) as client:
-        resp = client.get(f"https://www.googleapis.com/youtube/v3/{path}", params=params)
-        if resp.status_code != 200:
+    last_exc: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            with httpx.Client(timeout=20.0) as client:
+                resp = client.get(f"https://www.googleapis.com/youtube/v3/{path}", params=params)
+            if resp.status_code == 200:
+                return resp.json()
+            # Retry transient Google/backend errors
+            if resp.status_code in (429, 500, 503) and attempt < retries:
+                import time
+
+                time.sleep(0.4 * (attempt + 1))
+                continue
             raise _friendly_error(resp)
-        return resp.json()
+        except httpx.HTTPError as exc:
+            last_exc = exc
+            if attempt < retries:
+                import time
+
+                time.sleep(0.4 * (attempt + 1))
+                continue
+            raise YouTubeAPIError(f"YouTube request failed: {exc}") from exc
+    raise YouTubeAPIError(f"YouTube request failed: {last_exc}")
 
 
 def resolve_channel(url: str) -> dict:
@@ -207,21 +225,21 @@ def search_channels(query: str, max_results: int = 8) -> list[dict]:
         if not channel_id or channel_id in seen:
             continue
         seen.add(channel_id)
-        try:
-            results.append(get_channel(channel_id))
-        except YouTubeAPIError:
-            snippet = item.get("snippet", {})
-            thumbs = snippet.get("thumbnails", {})
-            results.append(
-                {
-                    "youtube_channel_id": channel_id,
-                    "name": snippet.get("title", ""),
-                    "handle": f"@{channel_id}",
-                    "thumbnail_url": (thumbs.get("high") or thumbs.get("default") or {}).get("url"),
-                    "description": snippet.get("description", ""),
-                    "uploads_playlist_id": None,
-                }
-            )
+        # Keep search fast/reliable — full channel details are fetched on Add.
+        snippet = item.get("snippet", {})
+        thumbs = snippet.get("thumbnails", {})
+        results.append(
+            {
+                "youtube_channel_id": channel_id,
+                "name": snippet.get("title", "") or snippet.get("channelTitle", ""),
+                "handle": f"@{(snippet.get('customUrl') or channel_id).lstrip('@')}",
+                "thumbnail_url": (
+                    thumbs.get("high") or thumbs.get("medium") or thumbs.get("default") or {}
+                ).get("url"),
+                "description": snippet.get("description", ""),
+                "uploads_playlist_id": None,
+            }
+        )
         if len(results) >= max_results:
             break
     return results

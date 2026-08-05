@@ -41,19 +41,20 @@ route("/search", () => mount("/search", renderSearch));
 
 async function boot() {
   startBackgroundWorker();
+  // Paint UI immediately — never block on restore/YouTube.
+  dispatch();
+
   try {
     const status = await api.status();
     store.setStatus(status);
   } catch {
-    /* offline-ish */
+    /* ignore */
   }
-  try {
-    await restoreFollowedCreators();
-  } catch (e) {
-    console.warn("restore failed", e);
-  }
-  kickBackgroundScans();
-  dispatch();
+
+  // Restore / sync in the background so Add Creator stays responsive.
+  restoreFollowedCreators()
+    .catch((e) => console.warn("restore failed", e))
+    .finally(() => kickBackgroundScans());
 }
 
 boot();

@@ -1,4 +1,4 @@
-import { api } from "../api.js";
+import { api, withRetry } from "../api.js";
 import { navigate } from "../router.js";
 import { el, loading, error, empty } from "../components/Sidebar.js";
 import { store } from "../store.js";
@@ -93,6 +93,24 @@ function meta(k, v) {
   ]);
 }
 
+async function addChannel(ch, statusEl) {
+  statusEl.textContent = `Adding ${ch.name}… (saving channel)`;
+  const res = await withRetry(
+    () =>
+      api.addCreator({
+        youtube_channel_id: ch.youtube_channel_id,
+        auto_scan: false,
+      }),
+    { tries: 3, delayMs: 900, label: "Add creator" }
+  );
+  store.rememberChannel({ ...ch, ...res.creator });
+  statusEl.textContent = res.import_error
+    ? `Saved ${ch.name}. Retrying video import…`
+    : `Imported ${res.videos_imported || 0} videos — queuing comment scans…`;
+  await afterCreatorAdded(res);
+  return res;
+}
+
 function openAddModal(onDone, liveReady, ytError = "") {
   const backdrop = el("div", { class: "modal-backdrop" });
   const input = el("input", {
@@ -104,6 +122,7 @@ function openAddModal(onDone, liveReady, ytError = "") {
 
   let timer = null;
   let latestQuery = "";
+  let adding = false;
 
   const runSearch = async () => {
     const q = input.value.trim();
@@ -120,7 +139,11 @@ function openAddModal(onDone, liveReady, ytError = "") {
     }
     status.textContent = "Searching YouTube…";
     try {
-      const data = await api.searchChannels(q);
+      const data = await withRetry(() => api.searchChannels(q), {
+        tries: 2,
+        delayMs: 500,
+        label: "Search",
+      });
       if (latestQuery !== q) return;
       results.replaceChildren();
       if (!data.channels.length) {
@@ -133,27 +156,21 @@ function openAddModal(onDone, liveReady, ytError = "") {
           el("button", {
             class: "channel-result",
             onclick: async () => {
-              status.textContent = `Adding ${ch.name}…`;
+              if (adding) return;
+              adding = true;
               results.querySelectorAll("button").forEach((b) => (b.disabled = true));
               try {
-                const res = await api.addCreator({
-                  youtube_channel_id: ch.youtube_channel_id,
-                  auto_scan: false,
-                });
-                await afterCreatorAdded(res);
-                status.textContent =
-                  (res.message || "Creator added.") +
-                  (res.videos_imported
-                    ? ` Imported ${res.videos_imported} videos — scanning in background.`
-                    : "");
+                const res = await addChannel(ch, status);
+                status.textContent = res.message || "Creator added.";
                 setTimeout(() => {
                   backdrop.remove();
                   onDone();
                   if (res.creator?.id) navigate(`/creator/${res.creator.id}`);
-                }, 650);
+                }, 500);
               } catch (e) {
-                status.textContent = e.message;
+                status.textContent = e.message || "Couldn’t add creator. Try again.";
                 results.querySelectorAll("button").forEach((b) => (b.disabled = false));
+                adding = false;
               }
             },
           }, [
@@ -180,7 +197,7 @@ function openAddModal(onDone, liveReady, ytError = "") {
       }
     } catch (e) {
       if (latestQuery !== q) return;
-      status.textContent = e.message;
+      status.textContent = e.message || "Search failed. Try again.";
       results.replaceChildren();
     }
   };
@@ -200,7 +217,7 @@ function openAddModal(onDone, liveReady, ytError = "") {
   const modal = el("div", { class: "modal modal-wide" }, [
     el("h2", { text: "Add Creator" }),
     el("p", {
-      text: "Search YouTube by creator name or paste a channel URL. Videos import immediately; comments keep scanning while you browse other pages.",
+      text: "Search YouTube by creator name or paste a channel URL. We’ll save the channel first, then import videos with retries if needed.",
     }),
     el("label", { text: "Search YouTube" }),
     input,
