@@ -61,15 +61,30 @@ Clip export still uses local/authorized source media (demo VOD or uploaded file)
 
 ## Deploy on Vercel
 
-This repo is set up as a FastAPI app (`backend.main:app` in `pyproject.toml`).
+This repo is a FastAPI app (`backend.main:app` in `pyproject.toml`).
 
-1. Import **Cillian-Cooke/ClipRadar** in Vercel (Framework: FastAPI, Root: `./`).
-2. In **Settings → Environment Variables**, add:
-   - `YOUTUBE_API_KEY` = your key (needed for live search/add/scan)
-   - Optional but recommended: `DATABASE_URL` = a Neon/Postgres connection string (keeps creators across cold starts). Without it, ClipRadar still remembers followed channels in the browser and re-imports them automatically.
-3. Redeploy.
+### Required: durable database
 
-**What works on Vercel:** browsing, YouTube channel search/add, importing ~10 recent videos, background comment scanning while you navigate (sidebar shows progress), client-side cache of creators/videos/moments.
+Vercel’s filesystem is ephemeral. **You must set a Neon Postgres `DATABASE_URL`** or creators/moments will vanish on every cold start.
 
-**Limits:** Without `DATABASE_URL`, server SQLite is ephemeral — the browser restores your followed channels on load. FFmpeg export needs local/demo media and may not fit serverless.
+1. Create a free project at [neon.tech](https://neon.tech)
+2. Open **Connection details** → copy the **pooled** connection string  
+   (host usually contains `-pooler`)
+3. In Vercel → your project → **Settings → Environment Variables**, add for **Production**:
+
+| Name | Value |
+|---|---|
+| `YOUTUBE_API_KEY` | your YouTube Data API v3 key (no quotes) |
+| `DATABASE_URL` | `postgresql://…@ep-…-pooler.…neon.tech/neondb?sslmode=require` |
+| `DEMO_MODE` | `false` |
+
+4. **Deployments → Redeploy** the latest production deployment  
+5. Hard-refresh the site → **Settings** should show **Database → Postgres (durable)** and YouTube **Connected**
+
+### Verify
+
+- Add a creator → videos import → sidebar shows scanning → Home fills in moments  
+- Reload the page (or wait a few minutes for a cold start) → the same creators are still there  
+
+**Still works without Postgres for a demo click-through**, but data will not persist. Clip MP4 export still needs local/demo media and is not the Vercel reliability path.
 

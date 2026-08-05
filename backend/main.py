@@ -50,19 +50,29 @@ def create_app() -> FastAPI:
 
     @app.get("/api/status")
     def status(check_youtube: bool = False):
+        from backend.config import database_backend, database_is_durable
         from backend.services.ffmpeg import ffmpeg_available
         from backend.services.youtube import api_configured, probe_api_key
 
         configured = api_configured()
         yt_ok = configured
         yt_error = None
+        durable = database_is_durable()
+        backend = database_backend()
+
         # Live probe only when explicitly requested (Settings) — keeps Add/Search snappy.
         if check_youtube and configured:
             yt_probe = probe_api_key()
             yt_ok = bool(yt_probe.get("valid"))
             yt_error = yt_probe.get("error")
 
-        if not configured:
+        if IS_VERCEL and not durable:
+            hint = (
+                "Vercel needs a durable DATABASE_URL (Neon Postgres). "
+                "Without it, creators disappear on every cold start. "
+                "Add DATABASE_URL in Vercel → Settings → Environment Variables, then redeploy."
+            )
+        elif not configured:
             hint = (
                 "Set YOUTUBE_API_KEY in Vercel → Project Settings → Environment Variables, then redeploy."
                 if IS_VERCEL
@@ -81,12 +91,15 @@ def create_app() -> FastAPI:
                 "youtube_api_valid": yt_ok if check_youtube else configured,
                 "youtube_api_error": yt_error,
                 "openai_api_key": bool(settings.openai_api_key and settings.openai_api_key.strip()),
+                "database_durable": durable,
+                "database_backend": backend,
             },
             "capabilities": {
                 "add_live_creators": configured,
                 "scan_comments": configured,
                 "export_clips": ffmpeg_available(),
                 "semantic_embeddings": "local",
+                "persistent_workspace": durable,
             },
             "limits": {
                 "max_comments_per_video": settings.max_comments_per_video,

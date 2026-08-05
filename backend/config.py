@@ -40,3 +40,31 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def database_is_durable() -> bool:
+    """True when not using ephemeral Vercel /tmp SQLite."""
+    url = (settings.database_url or "").strip().lower()
+    if (
+        url.startswith("postgresql://")
+        or url.startswith("postgres://")
+        or url.startswith("postgresql+psycopg://")
+    ):
+        return True
+    if IS_VERCEL:
+        # Any sqlite on Vercel is treated as ephemeral (even if path isn't /tmp)
+        return False
+    return True
+
+
+def database_backend() -> str:
+    url = (settings.database_url or "").strip().lower()
+    if (
+        url.startswith("postgresql://")
+        or url.startswith("postgres://")
+        or url.startswith("postgresql+psycopg://")
+    ):
+        return "postgres"
+    if url.startswith("sqlite"):
+        return "sqlite"
+    return "unknown"

@@ -8,20 +8,24 @@ export async function renderHome(root) {
   bindLivePage(root, async ({ silent }) => {
     if (!silent) {
       const cached = store.get().home;
-      if (cached) paint(root, cached);
+      if (cached) paint(root, cached, store.get().status);
       else root.replaceChildren(loading("Loading workspace…"));
     }
     try {
-      const data = await api.home();
+      const [data, status] = await Promise.all([
+        api.home(),
+        api.status().catch(() => null),
+      ]);
       store.setHome(data);
-      paint(root, data);
+      if (status) store.setStatus(status);
+      paint(root, data, status);
     } catch (e) {
       if (!silent && !store.get().home) root.replaceChildren(error(e.message));
     }
   });
 }
 
-function paint(root, data) {
+function paint(root, data, status) {
   const wrap = el("div");
   wrap.append(
     el("div", { class: "page-header" }, [
@@ -29,6 +33,32 @@ function paint(root, data) {
       el("p", { text: data.headline }),
     ])
   );
+
+  const onVercel = status?.setup?.platform === "vercel";
+  const durable = status?.credentials?.database_durable;
+  if (onVercel && durable === false) {
+    wrap.append(
+      el("div", {
+        class: "stat-card",
+        style: "margin-bottom:18px;max-width:720px;",
+      }, [
+        el("div", { class: "label", text: "Vercel database" }),
+        el("div", { class: "value", style: "font-size:18px;", text: "Not durable yet" }),
+        el("p", {
+          class: "muted",
+          style: "margin:8px 0 12px;line-height:1.5;",
+          text:
+            status?.setup?.hint ||
+            "Add a Neon Postgres DATABASE_URL in Vercel env vars or creators will disappear on cold starts.",
+        }),
+        el("button", {
+          class: "btn btn-primary btn-sm",
+          text: "Open Settings",
+          onclick: () => navigate("/settings"),
+        }),
+      ])
+    );
+  }
 
   const stats = el("div", { class: "grid-stats" });
   const pairs = [
@@ -56,11 +86,13 @@ function paint(root, data) {
       el("div", {
         class: "empty-state",
         text:
-          !creators.length && followed.length
-            ? `Restoring ${followed.length} saved creator${followed.length === 1 ? "" : "s"}… moments will appear here when scans finish.`
-            : creators.length
-              ? "Scans are running — moments will show up here as each video finishes."
-              : "No moments yet — add a creator to start your clip queue.",
+          onVercel && durable === false
+            ? "Set DATABASE_URL (Neon) in Settings so your workspace can persist on Vercel."
+            : !creators.length && followed.length
+              ? `Restoring ${followed.length} saved creator${followed.length === 1 ? "" : "s"}… moments will appear here when scans finish.`
+              : creators.length
+                ? "Scans are running — moments will show up here as each video finishes."
+                : "No moments yet — add a creator to start your clip queue.",
       })
     );
   }

@@ -10,6 +10,8 @@ export async function renderSettings(root) {
     const ytError = status.credentials.youtube_api_error;
     const ffmpeg = status.capabilities.export_clips;
     const onVercel = status.setup.platform === "vercel";
+    const durable = !!status.credentials.database_durable;
+    const dbBackend = status.credentials.database_backend || "unknown";
 
     let ytLabel = "Not configured";
     let ytHint = onVercel
@@ -27,6 +29,23 @@ export async function renderSettings(root) {
           : "A key is set in .env, but YouTube rejected it. Check the value and API restrictions.");
     }
 
+    const dbLabel = durable
+      ? dbBackend === "postgres"
+        ? "Postgres (durable)"
+        : "Local SQLite"
+      : "Ephemeral (/tmp SQLite)";
+    const dbHint = durable
+      ? dbBackend === "postgres"
+        ? "Creators, videos, and moments survive Vercel cold starts."
+        : "Local disk SQLite is fine for development."
+      : "Vercel wipes /tmp on cold starts. Add a Neon DATABASE_URL or creators will keep disappearing.";
+
+    const setupText = !durable && onVercel
+      ? "1. Create a free Neon project → copy the pooled connection string\n2. Vercel → Settings → Environment Variables\n   DATABASE_URL = postgresql://…?sslmode=require\n   YOUTUBE_API_KEY = your key\n   DEMO_MODE = false\n3. Deployments → Redeploy"
+      : onVercel
+        ? "Vercel → your project → Settings → Environment Variables\nName: YOUTUBE_API_KEY\nValue: paste key with no quotes\nEnvironments: Production (+ Preview)\nThen: Deployments → Redeploy"
+        : `# ${status.setup.env_file}\nYOUTUBE_API_KEY=your_key_here\n\n# Restart:\nuvicorn backend.main:app --reload --host 0.0.0.0 --port 8001`;
+
     root.replaceChildren(
       el("div", {}, [
         el("div", { class: "page-header" }, [
@@ -38,8 +57,25 @@ export async function renderSettings(root) {
           }),
         ]),
 
+        !durable && onVercel
+          ? el("div", {
+              class: "stat-card",
+              style:
+                "max-width:640px;margin-bottom:16px;border-color:color-mix(in srgb, #b45309 45%, var(--border-subtle));",
+            }, [
+              el("div", { class: "label", text: "Action required" }),
+              el("div", { class: "value", style: "font-size:18px;", text: "Add Neon DATABASE_URL" }),
+              el("p", {
+                class: "muted",
+                style: "margin:8px 0 0;line-height:1.5;",
+                text: status.setup.hint,
+              }),
+            ])
+          : null,
+
         el("div", { class: "section-title", text: "Credentials" }),
         card("YouTube Data API", ytLabel, ytHint, ytOk),
+        card("Database", dbLabel, dbHint, durable),
         card(
           "FFmpeg export",
           ffmpeg ? "Ready" : "Missing",
@@ -73,19 +109,12 @@ export async function renderSettings(root) {
             style: "margin:8px 0 0;line-height:1.5;",
             text: status.setup.hint,
           }),
-          onVercel
-            ? el("pre", {
-                class: "mono",
-                style:
-                  "margin:12px 0 0;padding:12px;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:6px;font-size:12px;overflow:auto;white-space:pre-wrap;",
-                text: "Vercel → your project → Settings → Environment Variables\nName: YOUTUBE_API_KEY\nValue: paste key with no quotes\nEnvironments: Production (+ Preview)\nThen: Deployments → Redeploy",
-              })
-            : el("pre", {
-                class: "mono",
-                style:
-                  "margin:12px 0 0;padding:12px;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:6px;font-size:12px;overflow:auto;",
-                text: `# ${status.setup.env_file}\nYOUTUBE_API_KEY=your_key_here\n\n# Restart:\nuvicorn backend.main:app --reload --host 0.0.0.0 --port 8001`,
-              }),
+          el("pre", {
+            class: "mono",
+            style:
+              "margin:12px 0 0;padding:12px;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:6px;font-size:12px;overflow:auto;white-space:pre-wrap;",
+            text: setupText,
+          }),
         ]),
       ])
     );
