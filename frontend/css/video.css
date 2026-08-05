@@ -1,7 +1,7 @@
 .video-workspace {
   display: grid;
   grid-template-columns: 1fr 320px;
-  height: 100%;
+  height: calc(100vh - 57px);
   min-height: 0;
   background: var(--bg);
 }

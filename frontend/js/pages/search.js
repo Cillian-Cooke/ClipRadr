@@ -1,6 +1,8 @@
 import { api, withRetry } from "../api.js";
 import { navigate } from "../router.js";
 import { el, loading, error, empty } from "../components/Sidebar.js";
+import { addChannel } from "../components/AddCreator.js";
+import { store } from "../store.js";
 
 export async function renderSearch(root) {
   const q = new URLSearchParams(window.location.search).get("q") || "";
@@ -23,15 +25,26 @@ export async function renderSearch(root) {
       api.search(q),
       api.status().catch(() => null),
     ]);
+    if (status) store.setStatus(status);
 
     let ytChannels = [];
-    if (status?.capabilities?.add_live_creators) {
+    let ytError = "";
+    const liveReady = !!status?.capabilities?.add_live_creators;
+    if (liveReady) {
       try {
-        const yt = await api.searchChannels(q);
+        const yt = await withRetry(() => api.searchChannels(q), {
+          tries: 2,
+          delayMs: 500,
+          label: "YouTube search",
+        });
         ytChannels = yt.channels || [];
-      } catch {
-        ytChannels = [];
+      } catch (e) {
+        ytError = e.message || "YouTube channel search failed.";
       }
+    } else {
+      ytError =
+        status?.credentials?.youtube_api_error ||
+        "YouTube not connected — open Settings to add creators from search.";
     }
 
     const wrap = el("div");
@@ -42,10 +55,31 @@ export async function renderSearch(root) {
       ])
     );
 
+    wrap.append(el("div", { class: "section-title", text: "YouTube channels" }));
     if (ytChannels.length) {
-      wrap.append(el("div", { class: "section-title", text: "YouTube channels" }));
       const list = el("div", { class: "card-list" });
       for (const ch of ytChannels) {
+        const statusLine = el("div", { class: "muted", style: "font-size:12px;min-height:16px;" });
+        const addBtn = el("button", {
+          class: "btn btn-sm btn-primary",
+          text: "Add",
+        });
+        addBtn.addEventListener("click", async () => {
+          addBtn.disabled = true;
+          addBtn.textContent = "Adding…";
+          try {
+            const res = await addChannel(ch, statusLine);
+            addBtn.textContent = "Added";
+            statusLine.textContent = res.message || "Creator added.";
+            setTimeout(() => {
+              if (res.creator?.id) navigate(`/creator/${res.creator.id}`);
+            }, 350);
+          } catch (err) {
+            statusLine.textContent = err.message || "Couldn’t add creator.";
+            addBtn.disabled = false;
+            addBtn.textContent = "Add";
+          }
+        });
         list.append(
           el("div", { class: "opportunity-card" }, [
             el("div", { style: "display:flex;gap:12px;align-items:center;min-width:0;" }, [
@@ -57,38 +91,22 @@ export async function renderSearch(root) {
               el("div", { style: "min-width:0;" }, [
                 el("h3", { text: ch.name, style: "margin:0;font-size:15px;" }),
                 el("div", { class: "muted", text: ch.handle }),
+                statusLine,
               ]),
             ]),
-            el("button", {
-              class: "btn btn-sm btn-primary",
-              text: "Add",
-              onclick: async (e) => {
-                const btn = e.currentTarget;
-                btn.disabled = true;
-                btn.textContent = "Adding…";
-                try {
-                  const res = await withRetry(
-                    () =>
-                      api.addCreator({
-                        youtube_channel_id: ch.youtube_channel_id,
-                        auto_scan: false,
-                      }),
-                    { tries: 3, delayMs: 900, label: "Add creator" }
-                  );
-                  const { afterCreatorAdded } = await import("../background.js");
-                  await afterCreatorAdded(res);
-                  navigate(`/creator/${res.creator.id}`);
-                } catch (err) {
-                  alert(err.message);
-                  btn.disabled = false;
-                  btn.textContent = "Add";
-                }
-              },
-            }),
+            addBtn,
           ])
         );
       }
       wrap.append(list);
+    } else {
+      wrap.append(
+        el("div", {
+          class: "muted",
+          style: "margin-bottom:16px;",
+          text: ytError || "No YouTube channels matched.",
+        })
+      );
     }
 
     if (local.creators.length) {
@@ -155,7 +173,12 @@ export async function renderSearch(root) {
       wrap.append(list);
     }
 
-    if (!ytChannels.length && !local.moments.length && !local.creators.length && !local.videos.length) {
+    if (
+      !ytChannels.length &&
+      !local.moments.length &&
+      !local.creators.length &&
+      !local.videos.length
+    ) {
       wrap.append(empty("No results."));
     }
 

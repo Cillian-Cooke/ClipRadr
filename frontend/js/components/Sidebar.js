@@ -1,5 +1,6 @@
 import { navigate } from "../router.js";
 import { store } from "../store.js";
+import { looksLikeChannelQuery, openAddCreatorModal } from "./AddCreator.js";
 
 const NAV = [
   { href: "/home", label: "Home", icon: "⌂" },
@@ -12,7 +13,7 @@ const NAV = [
 export function renderShell(
   activePath,
   contentNode,
-  { topbarExtra = null, contentClass = "", hideTopbar = false } = {}
+  { topbarExtra = null, contentClass = "" } = {}
 ) {
   const app = document.getElementById("app");
   app.replaceChildren();
@@ -87,29 +88,44 @@ export function renderShell(
   );
   sidebar.append(footer);
 
-  const main = el("main", { class: `main${hideTopbar ? " main-no-topbar" : ""}` });
+  const main = el("main", { class: "main" });
+  const topbar = el("div", { class: "topbar" });
+  const searchWrap = el("div", { class: "search-wrap" });
+  const search = el("input", {
+    type: "search",
+    placeholder: "Search library, or paste a YouTube channel / @handle…",
+  });
+  search.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || !search.value.trim()) return;
+    const q = search.value.trim();
+    if (looksLikeChannelQuery(q)) {
+      openAddCreatorModal({
+        initialQuery: q,
+        onDone: () => store.bumpData("creator-added"),
+      });
+      return;
+    }
+    navigate(`/search?q=${encodeURIComponent(q)}`);
+  });
+  searchWrap.append(search);
+  topbar.append(searchWrap);
+  topbar.append(
+    el("button", {
+      class: "btn btn-primary btn-sm",
+      text: "+ Add Creator",
+      onclick: () =>
+        openAddCreatorModal({
+          initialQuery: search.value.trim(),
+          onDone: () => store.bumpData("creator-added"),
+        }),
+    })
+  );
+  if (topbarExtra) topbar.append(topbarExtra);
+
   const content = el("div", { class: `content ${contentClass}`.trim() });
   content.append(contentNode);
 
-  if (!hideTopbar) {
-    const topbar = el("div", { class: "topbar" });
-    const searchWrap = el("div", { class: "search-wrap" });
-    const search = el("input", {
-      type: "search",
-      placeholder: "Search creators, videos, moments, topics…",
-    });
-    search.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && search.value.trim()) {
-        navigate(`/search?q=${encodeURIComponent(search.value.trim())}`);
-      }
-    });
-    searchWrap.append(search);
-    topbar.append(searchWrap);
-    if (topbarExtra) topbar.append(topbarExtra);
-    main.append(topbar);
-  }
-
-  main.append(content);
+  main.append(topbar, content);
   shell.append(sidebar, main);
   app.append(shell);
 }
