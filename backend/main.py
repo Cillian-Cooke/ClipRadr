@@ -10,7 +10,7 @@ from backend.config import IS_VERCEL, ROOT_DIR, settings
 from backend.database.database import Base, SessionLocal, engine
 from backend.database import models  # noqa: F401
 from backend.routes import clips, creators, exports, home, moments, search, videos, youtube_search
-from backend.services.demo_data import seed_demo_data
+from backend.services.demo_data import ensure_workspace
 
 FRONTEND = ROOT_DIR / "frontend"
 STATIC = FRONTEND / "static"
@@ -22,7 +22,7 @@ def create_app() -> FastAPI:
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
-        seed_demo_data(db)
+        ensure_workspace(db)
     finally:
         db.close()
 

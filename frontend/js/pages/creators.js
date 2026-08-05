@@ -22,10 +22,10 @@ export async function renderCreators(root) {
         el("h1", { text: "Creators" }),
         el("p", {
           text: liveReady
-            ? "Search YouTube and add creators you edit for."
+            ? "Your YouTube creators — search and add more anytime."
             : ytError
               ? `YouTube key issue: ${ytError}`
-              : "Demo creators are loaded. Connect a valid YOUTUBE_API_KEY to add live channels.",
+              : "Add creators once YouTube is connected in Settings.",
         }),
       ]),
       el("button", {
@@ -37,7 +37,7 @@ export async function renderCreators(root) {
     wrap.append(header);
 
     if (!data.creators.length) {
-      wrap.append(empty("No creators yet. Add one to get started."));
+      wrap.append(empty("No creators yet. Click Add Creator to import a channel."));
       root.replaceChildren(wrap);
       return;
     }
@@ -57,7 +57,6 @@ export async function renderCreators(root) {
             meta("Videos", c.video_count),
             meta("Clip opportunities", c.clip_opportunities),
             meta("Last scanned", c.last_scanned_at ? "Recently" : "—"),
-            meta("Type", c.is_demo ? "Demo" : "Live"),
           ]),
           el("button", {
             class: "btn",

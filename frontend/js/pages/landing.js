@@ -21,8 +21,8 @@ export function renderLanding() {
         }),
         el("button", {
           class: "btn",
-          text: "See how it works",
-          onclick: () => navigate("/video/1"),
+          text: "Add a creator",
+          onclick: () => navigate("/creators"),
         }),
       ]),
     ]),

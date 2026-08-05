@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from backend.config import ROOT_DIR
+from backend.config import ROOT_DIR, settings
 from backend.database import models
 from backend.services.embeddings import cosine_similarity, infer_topic, relationship_label, simple_embedding
 from backend.services.moments import TimestampMention, cluster_timestamps, suggested_clip_bounds
@@ -249,13 +249,75 @@ DEMO_VIDEOS = [
 ]
 
 
+def ensure_workspace_user(db: Session) -> models.User:
+    user = db.query(models.User).filter_by(email="editor@clipradar.demo").first()
+    if user:
+        return user
+    user = models.User(email="editor@clipradar.demo", name="Editor")
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def purge_demo_data(db: Session) -> int:
+    """Remove seeded demo creators (and cascaded videos/moments)."""
+    demo_creators = db.query(models.Creator).filter_by(is_demo=1).all()
+    if not demo_creators:
+        orphans = db.query(models.Video).filter_by(is_demo=1).all()
+        for video in orphans:
+            db.delete(video)
+        if orphans:
+            db.commit()
+        return 0
+
+    removed = 0
+    for creator in demo_creators:
+        db.query(models.UserCreator).filter_by(creator_id=creator.id).delete()
+        video_ids = [v.id for v in db.query(models.Video).filter_by(creator_id=creator.id).all()]
+        if video_ids:
+            moment_ids = [
+                m.id
+                for m in db.query(models.Moment).filter(models.Moment.video_id.in_(video_ids)).all()
+            ]
+            if moment_ids:
+                db.query(models.SavedClip).filter(models.SavedClip.moment_id.in_(moment_ids)).delete(
+                    synchronize_session=False
+                )
+                db.query(models.MomentRelation).filter(
+                    (models.MomentRelation.moment_a_id.in_(moment_ids))
+                    | (models.MomentRelation.moment_b_id.in_(moment_ids))
+                ).delete(synchronize_session=False)
+                db.query(models.MomentEmbedding).filter(
+                    models.MomentEmbedding.moment_id.in_(moment_ids)
+                ).delete(synchronize_session=False)
+                db.query(models.MomentComment).filter(
+                    models.MomentComment.moment_id.in_(moment_ids)
+                ).delete(synchronize_session=False)
+        if video_ids:
+            db.query(models.ExportJob).filter(models.ExportJob.video_id.in_(video_ids)).delete(
+                synchronize_session=False
+            )
+        db.delete(creator)
+        removed += 1
+    db.commit()
+    return removed
+
+
+def ensure_workspace(db: Session) -> None:
+    """Boot workspace user; seed or purge demo data based on DEMO_MODE."""
+    ensure_workspace_user(db)
+    if settings.demo_mode:
+        seed_demo_data(db)
+    else:
+        purge_demo_data(db)
+
+
 def seed_demo_data(db: Session) -> None:
-    existing = db.query(models.User).filter_by(email="editor@clipradar.demo").first()
-    if existing:
+    if db.query(models.Creator).filter_by(is_demo=1).first():
         return
 
-    user = models.User(email="editor@clipradar.demo", name="Demo Editor")
-    db.add(user)
+    user = ensure_workspace_user(db)
     db.flush()
 
     creators_by_channel: dict[str, models.Creator] = {}

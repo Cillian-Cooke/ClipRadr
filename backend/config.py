@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     database_url: str = _DEFAULT_DB
     openai_api_key: str = ""
     storage_path: str = _DEFAULT_STORAGE
-    demo_mode: bool = True
+    demo_mode: bool = False
     cluster_window_seconds: int = 10
     cluster_radius_seconds: int = 5
     max_cluster_span_seconds: int = 15

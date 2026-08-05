@@ -14,15 +14,22 @@ router = APIRouter(prefix="/api", tags=["home"])
 
 @router.get("/home")
 def home_stats(db: Session = Depends(get_db)):
-    creators = db.query(models.Creator).count()
-    videos = db.query(models.Video).count()
-    moments = db.query(models.Moment).count()
+    creators = db.query(models.Creator).filter_by(is_demo=0).count()
+    videos = db.query(models.Video).filter_by(is_demo=0).count()
+    moments = (
+        db.query(models.Moment)
+        .join(models.Video)
+        .filter(models.Video.is_demo == 0)
+        .count()
+    )
     exports = db.query(models.ExportJob).filter_by(status="COMPLETED").count()
     saved = db.query(models.SavedClip).count()
 
     top = (
         db.query(models.Moment)
+        .join(models.Video)
         .options(joinedload(models.Moment.video).joinedload(models.Video.creator))
+        .filter(models.Video.is_demo == 0)
         .order_by(models.Moment.score.desc())
         .limit(8)
         .all()
@@ -44,9 +51,16 @@ def home_stats(db: Session = Depends(get_db)):
     hour = __import__("datetime").datetime.now().hour
     greeting = "Good morning" if hour < 12 else "Good afternoon" if hour < 18 else "Good evening"
 
+    if moments:
+        headline = f"Your creators have {moments} potential clips waiting."
+    elif creators:
+        headline = "Scan a video to find audience-backed clip moments."
+    else:
+        headline = "Add a creator to start building your clip queue."
+
     return {
         "greeting": greeting,
-        "headline": f"Your creators have {moments} potential clips waiting.",
+        "headline": headline,
         "stats": {
             "creators_followed": creators,
             "videos_scanned": videos,
@@ -68,9 +82,9 @@ def opportunities(
 ):
     q = db.query(models.Moment).options(
         joinedload(models.Moment.video).joinedload(models.Video.creator)
-    )
+    ).join(models.Video).filter(models.Video.is_demo == 0)
     if creator_id:
-        q = q.join(models.Video).filter(models.Video.creator_id == creator_id)
+        q = q.filter(models.Video.creator_id == creator_id)
     if topic:
         q = q.filter(models.Moment.topic.ilike(f"%{topic}%"))
     if status == "HIGH":
