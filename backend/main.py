@@ -73,7 +73,11 @@ def create_app() -> FastAPI:
     app.mount("/css", StaticFiles(directory=str(FRONTEND / "css")), name="css")
     app.mount("/js", StaticFiles(directory=str(FRONTEND / "js")), name="js")
 
-    vendor_firebase = ROOT_DIR / "node_modules" / "firebase"
+    # Prefer committed frontend/vendor (works on Railway without npm).
+    # Fall back to node_modules for local `npm install` workflows.
+    vendor_firebase = FRONTEND / "vendor" / "firebase"
+    if not vendor_firebase.exists():
+        vendor_firebase = ROOT_DIR / "node_modules" / "firebase"
     if vendor_firebase.exists():
         app.mount(
             "/vendor/firebase",
