@@ -4,13 +4,15 @@ import { el, loading, error, empty } from "../components/Sidebar.js";
 import { store } from "/js/store.js";
 import { bindLivePage } from "../live.js";
 import {
-  getExcludeShortsPref,
-  setExcludeShortsPref,
+  getLengthFilterPref,
+  setLengthFilterPref,
+  lengthFilterHint,
+  lengthFilterEmptyMessage,
   renderLengthFilterBar,
 } from "../videoFilters.js";
 
 export async function renderVideosIndex(root) {
-  let excludeShorts = getExcludeShortsPref();
+  let lengthMode = getLengthFilterPref();
 
   async function draw({ silent = false } = {}) {
     if (!silent) root.replaceChildren(loading());
@@ -27,10 +29,10 @@ export async function renderVideosIndex(root) {
 
       wrap.append(
         renderLengthFilterBar(el, {
-          excludeShorts,
-          onChange: (on) => {
-            excludeShorts = on;
-            setExcludeShortsPref(on);
+          mode: lengthMode,
+          onChange: (mode) => {
+            lengthMode = mode;
+            setLengthFilterPref(mode);
             draw({ silent: true });
           },
         })
@@ -38,10 +40,10 @@ export async function renderVideosIndex(root) {
 
       const grid = el("div", { class: "video-grid" });
       let any = false;
-      let shortsHidden = 0;
+      let hidden = 0;
       for (const c of creators.creators) {
-        const vids = await api.creatorVideos(c.id, { excludeShorts });
-        shortsHidden += vids.shorts_hidden || 0;
+        const vids = await api.creatorVideos(c.id, { length: lengthMode });
+        hidden += vids.hidden || vids.shorts_hidden || 0;
         store.setCreatorVideos(c.id, vids.videos || []);
         for (const v of vids.videos || []) {
           any = true;
@@ -70,20 +72,15 @@ export async function renderVideosIndex(root) {
         }
       }
       if (!any) {
-        wrap.append(
-          empty(
-            excludeShorts && shortsHidden
-              ? "No long-form videos yet — Shorts are hidden. Switch to Include Shorts or refresh a creator."
-              : "No videos yet. Add a creator to import recent uploads."
-          )
-        );
+        wrap.append(empty(lengthFilterEmptyMessage(lengthMode)));
       } else {
-        if (excludeShorts && shortsHidden) {
+        const hint = lengthFilterHint(lengthMode, hidden);
+        if (hint) {
           wrap.append(
             el("p", {
               class: "muted",
               style: "margin:0 0 12px;",
-              text: `Hiding ${shortsHidden} Short${shortsHidden === 1 ? "" : "s"} (under 3 min / #shorts).`,
+              text: hint,
             })
           );
         }

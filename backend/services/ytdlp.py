@@ -45,8 +45,7 @@ def _ffmpeg_location_dir() -> str | None:
     """
     Directory yt-dlp can use with --ffmpeg-location.
 
-    imageio-ffmpeg ships a binary not named `ffmpeg`, so we expose a stable
-    symlink directory when needed.
+    Bundled builds may not be named `ffmpeg`, so expose a stable symlink dir.
     """
     ff = ffmpeg_binary()
     if not ff:
@@ -66,12 +65,18 @@ def _ffmpeg_location_dir() -> str | None:
     return str(link_dir)
 
 
-# Prefer progressive 360p (18) when available — works with android client and
-# avoids SABR/DRM-only adaptive streams. Fall back to merged ≤1080p.
-_FORMAT = "18/bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b"
+# Progressive 360p when available; otherwise merge DASH up to max_height.
+def _format_selector(max_height: int = 720) -> str:
+    h = max(144, int(max_height or 720))
+    return (
+        f"bv*[height<={h}]+ba/b[height<={h}]/"
+        f"bv*[height<=720]+ba/b[height<=720]/18/bv*+ba/b"
+    )
 
-# Avoid `tv` client — YouTube currently marks many tv formats as DRM.
-_PLAYER_CLIENTS = "android,web"
+
+# android_vr still returns real https URLs; android/web are often SABR-only.
+# Avoid `tv` — frequently DRM'd. Avoid plain `web` — SABR-only.
+_PLAYER_CLIENTS = "android_vr,android"
 
 
 def download_clip_section(
@@ -80,6 +85,7 @@ def download_clip_section(
     start_seconds: float,
     end_seconds: float,
     output_path: str | Path,
+    max_height: int = 720,
 ) -> Path:
     """Download only [start, end] from YouTube into output_path (mp4 preferred)."""
     start = max(0.0, float(start_seconds))
@@ -87,14 +93,34 @@ def download_clip_section(
     duration = max(0.5, end - start)
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
+    height = max(144, int(max_height or 720))
 
     url = f"https://www.youtube.com/watch?v={youtube_video_id}"
     ff_bin = ffmpeg_binary()
     if not ff_bin:
-        raise YtDlpError("ffmpeg is required for clip export.")
+        raise YtDlpError(
+            "ffmpeg is required for clip export. Install static-ffmpeg or system ffmpeg."
+        )
 
-    # Preferred path: resolve a progressive stream URL, then ffmpeg-cut the range.
-    # Avoids fragile --download-sections + DRM/tv clients.
+    ff_dir = _ffmpeg_location_dir()
+    errors: list[str] = []
+    fmt = _format_selector(height)
+
+    # 1) Preferred: yt-dlp section download with android_vr (https DASH/progressive).
+    try:
+        return _download_with_sections(
+            url=url,
+            start=start,
+            end=end,
+            output_path=out,
+            ff_dir=ff_dir,
+            clients=_PLAYER_CLIENTS,
+            fmt=fmt,
+        )
+    except YtDlpError as exc:
+        errors.append(str(exc))
+
+    # 2) Resolve a progressive/DASH URL and cut with a non-imageio ffmpeg.
     try:
         return _cut_from_direct_url(
             page_url=url,
@@ -102,13 +128,40 @@ def download_clip_section(
             duration=duration,
             output_path=out,
             ff_bin=ff_bin,
+            clients="android_vr",
+            max_height=height,
         )
-    except YtDlpError:
-        pass
+    except YtDlpError as exc:
+        errors.append(str(exc))
 
+    # 3) Last resort: download progressive format fully, then cut locally.
+    try:
+        return _download_full_then_cut(
+            url=url,
+            start=start,
+            duration=duration,
+            output_path=out,
+            ff_bin=ff_bin,
+            ff_dir=ff_dir,
+            max_height=height,
+        )
+    except YtDlpError as exc:
+        errors.append(str(exc))
+
+    raise YtDlpError(" | ".join(e for e in errors if e)[-2000:] or "YouTube clip download failed")
+
+
+def _download_with_sections(
+    *,
+    url: str,
+    start: float,
+    end: float,
+    output_path: Path,
+    ff_dir: str | None,
+    clients: str,
+    fmt: str,
+) -> Path:
     section = f"*{start:.3f}-{end:.3f}"
-    ff_dir = _ffmpeg_location_dir()
-
     with tempfile.TemporaryDirectory(prefix="clipradar_yt_") as tmp:
         tmp_base = Path(tmp) / "section"
         cmd = [
@@ -118,11 +171,11 @@ def download_clip_section(
             "--download-sections",
             section,
             "-f",
-            _FORMAT,
+            fmt,
             "--merge-output-format",
             "mp4",
             "--extractor-args",
-            f"youtube:player_client={_PLAYER_CLIENTS}",
+            f"youtube:player_client={clients}",
             "-o",
             str(tmp_base) + ".%(ext)s",
             "--no-warnings",
@@ -134,13 +187,28 @@ def download_clip_section(
 
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            err = (result.stderr or result.stdout or "yt-dlp failed").strip()
-            result = _download_fallback(
-                url=url,
-                section=section,
-                tmp_base=tmp_base,
-                ff_dir=ff_dir,
-            )
+            err = (result.stderr or result.stdout or "yt-dlp section download failed").strip()
+            # Retry once with progressive-only + android_vr
+            cmd_retry = [
+                *_ytdlp_cmd_prefix(),
+                "--no-playlist",
+                "--force-keyframes-at-cuts",
+                "--download-sections",
+                section,
+                "-f",
+                "18/best",
+                "--merge-output-format",
+                "mp4",
+                "--extractor-args",
+                "youtube:player_client=android_vr",
+                "-o",
+                str(tmp_base) + ".%(ext)s",
+                "--newline",
+                url,
+            ]
+            if ff_dir:
+                cmd_retry.extend(["--ffmpeg-location", ff_dir])
+            result = subprocess.run(cmd_retry, capture_output=True, text=True)
             if result.returncode != 0:
                 err2 = (result.stderr or result.stdout or err).strip()
                 raise YtDlpError(err2[-2000:])
@@ -150,20 +218,23 @@ def download_clip_section(
             raise YtDlpError("yt-dlp finished but produced no file.")
 
         src = produced[0]
+        ff_bin = ffmpeg_binary()
         if src.suffix.lower() == ".mp4":
-            shutil.copy2(src, out)
-        else:
+            shutil.copy2(src, output_path)
+        elif ff_bin:
             remux = subprocess.run(
-                [ff_bin, "-y", "-i", str(src), "-c", "copy", "-movflags", "+faststart", str(out)],
+                [ff_bin, "-y", "-i", str(src), "-c", "copy", "-movflags", "+faststart", str(output_path)],
                 capture_output=True,
                 text=True,
             )
-            if remux.returncode != 0 or not out.exists():
+            if remux.returncode != 0 or not output_path.exists():
                 raise YtDlpError(remux.stderr[-1500:] or "Remux failed")
+        else:
+            raise YtDlpError("Downloaded non-mp4 section and ffmpeg is unavailable.")
 
-    if not out.exists():
-        raise YtDlpError("Clip file missing after download.")
-    return out
+    if not output_path.exists() or output_path.stat().st_size < 1000:
+        raise YtDlpError("Clip file missing or empty after section download.")
+    return output_path
 
 
 def _cut_from_direct_url(
@@ -173,16 +244,18 @@ def _cut_from_direct_url(
     duration: float,
     output_path: Path,
     ff_bin: str,
+    clients: str = "android_vr",
+    max_height: int = 720,
 ) -> Path:
-    """Resolve a progressive media URL with yt-dlp, then cut with ffmpeg."""
+    """Resolve a media URL with yt-dlp, then cut with ffmpeg."""
     probe = subprocess.run(
         [
             *_ytdlp_cmd_prefix(),
             "--no-playlist",
             "-f",
-            "18/best[ext=mp4]/best",
+            _format_selector(max_height),
             "--extractor-args",
-            f"youtube:player_client={_PLAYER_CLIENTS}",
+            f"youtube:player_client={clients}",
             "-g",
             page_url,
         ],
@@ -195,9 +268,10 @@ def _cut_from_direct_url(
     lines = [ln.strip() for ln in (probe.stdout or "").splitlines() if ln.strip()]
     if not lines:
         raise YtDlpError("No stream URL from yt-dlp.")
+    # When DASH is selected, -g may return video then audio URL. Prefer first (video)
+    # for stream-copy cuts; re-encode path below still works for progressive.
     media_url = lines[0]
 
-    # Input seek after -ss is slower but more accurate for remote progressive MP4.
     cut = subprocess.run(
         [
             ff_bin,
@@ -221,7 +295,6 @@ def _cut_from_direct_url(
         text=True,
     )
     if cut.returncode != 0 or not output_path.exists() or output_path.stat().st_size < 1000:
-        # Re-encode if stream copy fails (odd timestamps / keyframes).
         cut = subprocess.run(
             [
                 ff_bin,
@@ -255,34 +328,97 @@ def _cut_from_direct_url(
     return output_path
 
 
-def _download_fallback(
+def _download_full_then_cut(
     *,
     url: str,
-    section: str,
-    tmp_base: Path,
+    start: float,
+    duration: float,
+    output_path: Path,
+    ff_bin: str,
     ff_dir: str | None,
-) -> subprocess.CompletedProcess:
-    """Looser second attempt — android progressive, then cut."""
-    cmd = [
-        *_ytdlp_cmd_prefix(),
-        "--no-playlist",
-        "--force-keyframes-at-cuts",
-        "--download-sections",
-        section,
-        "-f",
-        "18/best",
-        "--merge-output-format",
-        "mp4",
-        "--extractor-args",
-        "youtube:player_client=android",
-        "-o",
-        str(tmp_base) + ".%(ext)s",
-        "--newline",
-        url,
-    ]
-    if ff_dir:
-        cmd.extend(["--ffmpeg-location", ff_dir])
-    return subprocess.run(cmd, capture_output=True, text=True)
+    max_height: int = 720,
+) -> Path:
+    """Download selected quality (no remote ffmpeg), then cut locally."""
+    with tempfile.TemporaryDirectory(prefix="clipradar_yt_full_") as tmp:
+        tmp_base = Path(tmp) / "full"
+        cmd = [
+            *_ytdlp_cmd_prefix(),
+            "--no-playlist",
+            "-f",
+            _format_selector(max_height),
+            "--merge-output-format",
+            "mp4",
+            "--extractor-args",
+            "youtube:player_client=android_vr,android",
+            "-o",
+            str(tmp_base) + ".%(ext)s",
+            "--no-warnings",
+            "--newline",
+            url,
+        ]
+        if ff_dir:
+            cmd.extend(["--ffmpeg-location", ff_dir])
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise YtDlpError((result.stderr or result.stdout or "Full download failed")[-2000:])
+        produced = sorted(Path(tmp).glob("full.*"))
+        if not produced:
+            raise YtDlpError("Full download produced no file.")
+        src = produced[0]
+        cut = subprocess.run(
+            [
+                ff_bin,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-ss",
+                f"{start:.3f}",
+                "-i",
+                str(src),
+                "-t",
+                f"{duration:.3f}",
+                "-c",
+                "copy",
+                "-movflags",
+                "+faststart",
+                str(output_path),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if cut.returncode != 0 or not output_path.exists() or output_path.stat().st_size < 1000:
+            cut = subprocess.run(
+                [
+                    ff_bin,
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-ss",
+                    f"{start:.3f}",
+                    "-i",
+                    str(src),
+                    "-t",
+                    f"{duration:.3f}",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "ultrafast",
+                    "-crf",
+                    "23",
+                    "-c:a",
+                    "aac",
+                    "-movflags",
+                    "+faststart",
+                    str(output_path),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if cut.returncode != 0 or not output_path.exists():
+                raise YtDlpError(cut.stderr[-1500:] or "Local cut after full download failed")
+    return output_path
 
 
 def export_youtube_clip(
@@ -300,10 +436,11 @@ def export_youtube_clip(
     """
     Fetch the IN→OUT section once, then finalize.
 
-    For standard YouTube 16:9 CENTER exports we only remux (+faststart) —
-    avoiding a full second H.264 encode. Other aspects still re-encode once.
+    For standard 16:9 CENTER exports at the downloaded resolution we remux
+    (+faststart). Other aspects / upscales still re-encode once.
     """
     out = Path(output_path)
+    max_height = int(height or 720)
     if on_progress:
         on_progress(30)
     with tempfile.TemporaryDirectory(prefix="clipradar_yt_raw_") as tmp:
@@ -313,12 +450,15 @@ def export_youtube_clip(
             start_seconds=start_seconds,
             end_seconds=end_seconds,
             output_path=raw,
+            max_height=max_height,
         )
         if on_progress:
             on_progress(70)
 
         needs_crop = aspect_ratio != "16:9" or (crop_position or "CENTER").upper() != "CENTER"
-        if not needs_crop and (width in (None, 1920)) and (height in (None, 1080)):
+        # Remux-only when we are not cropping and not forcing a larger canvas.
+        # Downloaded height already matches the chosen quality.
+        if not needs_crop:
             try:
                 remux_faststart(raw, out)
                 if on_progress:

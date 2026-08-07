@@ -8,8 +8,13 @@ const DEFAULT_CLIP_SECONDS = 30;
 /** Pull clip start back so the flagged moment isn't the first frame. */
 const CLIP_LEAD_IN_SECONDS = 5;
 const YT_ASPECT = "16:9";
-const YT_WIDTH = 1920;
-const YT_HEIGHT = 1080;
+const EXPORT_QUALITIES = [
+  { height: 360, label: "360p", size: "640 × 360" },
+  { height: 480, label: "480p", size: "854 × 480" },
+  { height: 720, label: "720p", size: "1280 × 720" },
+  { height: 1080, label: "1080p", size: "1920 × 1080" },
+];
+const DEFAULT_EXPORT_QUALITY = 720;
 
 export async function renderVideo(root, id) {
   const cached = store.get().videoById?.[id];
@@ -845,14 +850,15 @@ function updatePlayhead(state) {
 
 async function saveCurrent(state) {
   if (!state.selected) return;
+  const q = EXPORT_QUALITIES.find((x) => x.height === DEFAULT_EXPORT_QUALITY) || EXPORT_QUALITIES[2];
   try {
     await api.saveClip({
       moment_id: state.selected.id,
       start_seconds: state.clipStart,
       end_seconds: state.clipEnd,
       aspect_ratio: YT_ASPECT,
-      width: YT_WIDTH,
-      height: YT_HEIGHT,
+      width: Math.round((q.height * 16) / 9),
+      height: q.height,
       crop_position: "CENTER",
       notes: "",
     });
@@ -866,18 +872,52 @@ function openExportModal(state) {
   const hasLocal = !!state.video.has_source_media;
   const hasYt = !!state.video.youtube_video_id;
   if (!hasLocal && !hasYt) {
-    flash("This video has no local source and no YouTube id — cannot export.");
+    flash("This video has no YouTube id — cannot export.");
     return;
+  }
+
+  let quality = DEFAULT_EXPORT_QUALITY;
+  try {
+    const saved = Number(localStorage.getItem("clipradar_export_quality"));
+    if (EXPORT_QUALITIES.some((q) => q.height === saved)) quality = saved;
+  } catch {
+    /* ignore */
   }
 
   const backdrop = el("div", { class: "modal-backdrop" });
   const progress = el("div", { class: "progress-bar" }, [el("span")]);
   const status = el("div", {
     class: "muted",
-    text: hasLocal
-      ? "Ready — will cut from local source."
-      : "Ready — will auto-fetch this range from YouTube (yt-dlp).",
+    text: "Ready — fetches the selected range from YouTube.",
   });
+  const sizeLabel = el("div", { class: "v", text: "" });
+  const qualityBar = el("div", { class: "filter-bar", style: "margin:8px 0 0;" });
+
+  const paintQuality = () => {
+    const q = EXPORT_QUALITIES.find((x) => x.height === quality) || EXPORT_QUALITIES[2];
+    sizeLabel.textContent = q.size;
+    qualityBar.replaceChildren();
+    for (const opt of EXPORT_QUALITIES) {
+      qualityBar.append(
+        el("button", {
+          class: `chip ${quality === opt.height ? "active" : ""}`,
+          text: opt.label,
+          type: "button",
+          onclick: () => {
+            quality = opt.height;
+            try {
+              localStorage.setItem("clipradar_export_quality", String(quality));
+            } catch {
+              /* ignore */
+            }
+            paintQuality();
+          },
+        })
+      );
+    }
+  };
+  paintQuality();
+
   const downloadBtn = el("button", {
     class: "btn btn-primary",
     text: "Download Clip",
@@ -903,15 +943,19 @@ function openExportModal(state) {
   const modal = el("div", { class: "modal" }, [
     el("h2", { text: "Export clip" }),
     el("p", {
-      text: hasLocal
-        ? "YouTube 1920×1080 MP4 from the selected range (local source)."
-        : "Fetches only the selected range from YouTube, then encodes 1920×1080 MP4.",
+      text: "Downloads only the selected range from YouTube, then encodes an MP4.",
     }),
     el("div", { class: "export-summary" }, [
       summary("Range", `${formatTime(state.clipStart)} → ${formatTime(state.clipEnd)}`),
       summary("Duration", `${dur}s`),
-      summary("Source", hasLocal ? "Local file" : "YouTube (auto)"),
-      summary("Size", "1920 × 1080"),
+      el("div", {}, [
+        el("div", { class: "k", text: "Quality" }),
+        qualityBar,
+      ]),
+      el("div", {}, [
+        el("div", { class: "k", text: "Size" }),
+        sizeLabel,
+      ]),
     ]),
     progress,
     status,
@@ -924,7 +968,8 @@ function openExportModal(state) {
         onclick: async (e) => {
           const btn = e.currentTarget;
           btn.disabled = true;
-          status.textContent = hasLocal ? "Encoding…" : "Fetching clip from YouTube…";
+          const q = EXPORT_QUALITIES.find((x) => x.height === quality) || EXPORT_QUALITIES[2];
+          status.textContent = `Fetching ${q.label} clip from YouTube…`;
           progress.firstChild.style.width = "15%";
           try {
             let start = state.clipStart;
@@ -944,8 +989,9 @@ function openExportModal(state) {
               start_seconds: start,
               end_seconds: end,
               aspect_ratio: YT_ASPECT,
-              width: YT_WIDTH,
-              height: YT_HEIGHT,
+              quality: q.height,
+              width: Math.round((q.height * 16) / 9),
+              height: q.height,
               crop_position: "CENTER",
             });
             while (job.status === "QUEUED" || job.status === "PROCESSING") {
@@ -953,18 +999,14 @@ function openExportModal(state) {
               job = await api.exportStatus(job.id);
               const p = Math.max(job.progress || 0, 12);
               progress.firstChild.style.width = `${p}%`;
-              if (!hasLocal) {
-                if (p < 35) status.textContent = `Fetching clip from YouTube… ${p}%`;
-                else if (p < 75) status.textContent = `Downloading section… ${p}%`;
-                else if (p < 100) status.textContent = `Finalizing MP4… ${p}%`;
-                else status.textContent = `Almost done… ${p}%`;
-              } else {
-                status.textContent = `Encoding… ${p}%`;
-              }
+              if (p < 35) status.textContent = `Fetching ${q.label} from YouTube… ${p}%`;
+              else if (p < 75) status.textContent = `Downloading section… ${p}%`;
+              else if (p < 100) status.textContent = `Finalizing MP4… ${p}%`;
+              else status.textContent = `Almost done… ${p}%`;
             }
             if (job.status === "COMPLETED") {
               progress.firstChild.style.width = "100%";
-              status.textContent = "Ready.";
+              status.textContent = `Ready — ${q.label}.`;
               downloadBtn.style.display = "inline-flex";
               downloadUrl = job.download_url;
             } else {

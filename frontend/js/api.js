@@ -149,10 +149,11 @@ export const api = {
   health: () => request("/api/health"),
   creators: () => request("/api/creators"),
   creator: (id) => request(`/api/creators/${id}`),
-  creatorVideos: (id, { excludeShorts } = {}) => {
+  creatorVideos: (id, { length, excludeShorts } = {}) => {
     const params = new URLSearchParams();
-    if (excludeShorts === false) params.set("exclude_shorts", "false");
-    else if (excludeShorts === true) params.set("exclude_shorts", "true");
+    if (length) params.set("length", length);
+    else if (excludeShorts === false) params.set("length", "all");
+    else if (excludeShorts === true) params.set("length", "no_shorts");
     const qs = params.toString();
     return request(`/api/creators/${id}/videos${qs ? `?${qs}` : ""}`);
   },

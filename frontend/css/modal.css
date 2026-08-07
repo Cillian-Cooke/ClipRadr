@@ -19,8 +19,12 @@
   color: var(--text-dim);
 }
 
-.export-summary .v {
-  margin-top: 4px;
-  font-family: var(--mono);
-  font-weight: 600;
+.export-summary .filter-bar {
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.export-summary .chip {
+  font-size: 12px;
+  padding: 4px 10px;
 }

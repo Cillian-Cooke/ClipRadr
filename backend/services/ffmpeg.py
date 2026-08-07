@@ -22,9 +22,32 @@ class FFmpegError(RuntimeError):
 
 
 def ffmpeg_binary() -> str | None:
+    """
+    Resolve an ffmpeg that can cut YouTube HTTPS streams.
+
+    Prefer system / static builds — imageio-ffmpeg's binary often SIGSEGVs
+    (exit -11) on googlevideo URLs, which breaks yt-dlp --download-sections.
+    """
+    import os
+
+    for candidate in (os.environ.get("CLIPRADAR_FFMPEG"), os.environ.get("FFMPEG_BINARY")):
+        if candidate and Path(candidate).is_file():
+            return candidate
+
     path = shutil.which("ffmpeg")
     if path:
         return path
+
+    try:
+        import static_ffmpeg
+
+        static_ffmpeg.add_paths()
+        path = shutil.which("ffmpeg")
+        if path:
+            return path
+    except Exception:
+        pass
+
     try:
         import imageio_ffmpeg
 

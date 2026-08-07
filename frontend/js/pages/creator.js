@@ -6,23 +6,26 @@ import { bindLivePage } from "../live.js";
 import { kickBackgroundScans, removeCreatorFollow } from "/js/background.js";
 import { refreshWorkspace } from "../refresh.js";
 import {
-  getExcludeShortsPref,
-  setExcludeShortsPref,
+  getLengthFilterPref,
+  setLengthFilterPref,
   isShortVideo,
+  lengthFilterHint,
+  lengthFilterEmptyMessage,
+  lengthFilterSectionTitle,
   renderLengthFilterBar,
 } from "../videoFilters.js";
 
 export async function renderCreator(root, id) {
-  let excludeShorts = getExcludeShortsPref();
+  let lengthMode = getLengthFilterPref();
 
   bindLivePage(root, async ({ silent }) => {
     if (!silent) root.replaceChildren(loading());
     try {
       await draw(root, id, {
-        excludeShorts,
-        setExcludeShorts: (on) => {
-          excludeShorts = on;
-          setExcludeShortsPref(on);
+        lengthMode,
+        setLengthMode: (mode) => {
+          lengthMode = mode;
+          setLengthFilterPref(mode);
         },
       });
     } catch (e) {
@@ -31,10 +34,10 @@ export async function renderCreator(root, id) {
   });
 }
 
-async function draw(root, id, { excludeShorts, setExcludeShorts }) {
+async function draw(root, id, { lengthMode, setLengthMode }) {
   const [creator, videosRes, status] = await Promise.all([
     api.creator(id),
-    api.creatorVideos(id, { excludeShorts }),
+    api.creatorVideos(id, { length: lengthMode }),
     api.status().catch(() => null),
   ]);
   store.setCreatorVideos(id, videosRes.videos || []);
@@ -67,7 +70,7 @@ async function draw(root, id, { excludeShorts, setExcludeShorts }) {
           e.currentTarget.disabled = true;
           e.currentTarget.textContent = "Queuing…";
           try {
-            const all = await api.creatorVideos(id, { excludeShorts: false });
+            const all = await api.creatorVideos(id, { length: "all" });
             const vids = (all.videos || [])
               .filter((v) => !v.is_demo && !isShortVideo(v))
               .map((v) => v.id);
@@ -151,29 +154,30 @@ async function draw(root, id, { excludeShorts, setExcludeShorts }) {
 
   wrap.append(
     renderLengthFilterBar(el, {
-      excludeShorts,
-      onChange: (on) => {
-        setExcludeShorts(on);
-        draw(root, id, { excludeShorts: on, setExcludeShorts }).catch((err) => {
+      mode: lengthMode,
+      onChange: (mode) => {
+        setLengthMode(mode);
+        draw(root, id, { lengthMode: mode, setLengthMode }).catch((err) => {
           root.replaceChildren(error(err.message));
         });
       },
     })
   );
 
-  const shortsHidden = videosRes.shorts_hidden || 0;
+  const hidden = videosRes.hidden || videosRes.shorts_hidden || 0;
   wrap.append(
     el("div", {
       class: "section-title",
-      text: excludeShorts ? "Recent long-form videos" : "Recent Videos",
+      text: lengthFilterSectionTitle(lengthMode),
     })
   );
-  if (excludeShorts && shortsHidden) {
+  const hint = lengthFilterHint(lengthMode, hidden);
+  if (hint) {
     wrap.append(
       el("p", {
         class: "muted",
         style: "margin:-4px 0 12px;",
-        text: `Hiding ${shortsHidden} Short${shortsHidden === 1 ? "" : "s"} (under 3 min / #shorts).`,
+        text: hint,
       })
     );
   }
@@ -251,10 +255,7 @@ async function draw(root, id, { excludeShorts, setExcludeShorts }) {
     wrap.append(
       el("p", {
         class: "muted",
-        text:
-          excludeShorts && shortsHidden
-            ? "No long-form videos in the recent window. Try Include Shorts or Refresh videos."
-            : "No videos imported yet. Click Refresh videos.",
+        text: lengthFilterEmptyMessage(lengthMode),
       })
     );
   } else {

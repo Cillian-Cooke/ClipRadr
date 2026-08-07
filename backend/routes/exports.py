@@ -29,6 +29,16 @@ class ExportBody(BaseModel):
     width: int | None = None
     height: int | None = None
     crop_position: str = "CENTER"
+    # 360 | 480 | 720 | 1080 — preferred over width/height for YouTube clips
+    quality: int | None = None
+
+
+QUALITY_PRESETS = {
+    360: (640, 360),
+    480: (854, 480),
+    720: (1280, 720),
+    1080: (1920, 1080),
+}
 
 
 def _job_dict(job: models.ExportJob) -> dict:
@@ -92,7 +102,13 @@ def create_export(
         raise HTTPException(400, "ffmpeg is not available for encoding.")
 
     w, h = ASPECT_PRESETS.get(body.aspect_ratio, (1920, 1080))
-    if body.width and body.height:
+    if body.quality:
+        q = int(body.quality)
+        # Snap to nearest supported rung
+        if q not in QUALITY_PRESETS:
+            q = min(QUALITY_PRESETS.keys(), key=lambda x: abs(x - q))
+        w, h = QUALITY_PRESETS[q]
+    elif body.width and body.height:
         w, h = body.width, body.height
 
     job = create_export_job(

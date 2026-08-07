@@ -190,14 +190,23 @@ def remove_creator(
 @router.get("/{creator_id}/videos")
 def creator_videos(
     creator_id: int,
-    exclude_shorts: bool = Query(True),
+    length: str = Query("no_shorts"),
+    exclude_shorts: bool | None = Query(None),
     db: Session = Depends(get_db),
 ):
-    from backend.services.video_filters import is_youtube_short
+    from backend.services.video_filters import LENGTH_FILTERS, passes_length_filter
 
     creator = db.get(models.Creator, creator_id)
     if not creator:
         raise HTTPException(404, "Creator not found")
+
+    mode = (length or "no_shorts").strip().lower()
+    # Back-compat for older clients that only sent exclude_shorts.
+    if exclude_shorts is not None and length == "no_shorts":
+        mode = "no_shorts" if exclude_shorts else "all"
+    if mode not in LENGTH_FILTERS:
+        mode = "no_shorts"
+
     videos = (
         db.query(models.Video)
         .options(joinedload(models.Video.creator), joinedload(models.Video.source_media))
@@ -206,15 +215,21 @@ def creator_videos(
         .all()
     )
     items = []
-    shorts_hidden = 0
+    hidden = 0
     for video in videos:
-        if exclude_shorts and is_youtube_short(video.duration_seconds, video.title):
-            shorts_hidden += 1
+        if not passes_length_filter(video.duration_seconds, video.title, mode):
+            hidden += 1
             continue
         moments = db.query(models.Moment).filter_by(video_id=video.id).all()
         high = sum(1 for m in moments if m.score >= 80)
         items.append(video_to_dict(video, moment_count=len(moments), high_confidence=high))
-    return {"videos": items, "shorts_hidden": shorts_hidden, "exclude_shorts": exclude_shorts}
+    return {
+        "videos": items,
+        "hidden": hidden,
+        "shorts_hidden": hidden,  # back-compat
+        "length": mode,
+        "exclude_shorts": mode != "all",
+    }
 
 
 @router.post("/{creator_id}/scan")
