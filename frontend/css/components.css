@@ -161,7 +161,7 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   background:
-    radial-gradient(ellipse at 15% 10%, rgba(227, 106, 26, 0.1), transparent 45%),
+    radial-gradient(ellipse at 15% 10%, rgba(240, 21, 25, 0.1), transparent 45%),
     var(--bg);
 }
 

@@ -118,7 +118,5 @@ def web_config_public() -> dict[str, str]:
 
 
 def auth_required() -> bool:
-    """Require login when Firebase Admin is ready and bypass is off."""
-    if settings.dev_auth_bypass:
-        return False
-    return firebase_ready()
+    """Require login unless DEV_AUTH_BYPASS is explicitly enabled."""
+    return not settings.dev_auth_bypass

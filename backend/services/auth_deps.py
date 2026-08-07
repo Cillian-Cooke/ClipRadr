@@ -14,7 +14,10 @@ from backend.database import models
 from backend.services.demo_data import ensure_workspace_user
 from backend.services.firebase_app import (
     auth_required,
+    firebase_configured,
+    firebase_init_error,
     firebase_ready,
+    get_firebase_app,
     verify_id_token,
     web_config_public,
 )
@@ -111,19 +114,26 @@ def get_current_user(
             bypass=False,
         )
 
-    if auth_required():
-        raise HTTPException(401, "Sign in required. Missing Authorization Bearer token.")
+    # Explicit local-only bypass — never used unless DEV_AUTH_BYPASS=true.
+    if settings.dev_auth_bypass:
+        user = ensure_workspace_user(db)
+        return AuthContext(
+            sql_user=user,
+            firebase_uid=user.firebase_uid,
+            email=user.email,
+            name=user.name,
+            plan="pro",
+            bypass=True,
+        )
 
-    # Dev bypass — single workspace user
-    user = ensure_workspace_user(db)
-    return AuthContext(
-        sql_user=user,
-        firebase_uid=user.firebase_uid,
-        email=user.email,
-        name=user.name,
-        plan="pro",
-        bypass=True,
-    )
+    if not firebase_ready():
+        raise HTTPException(
+            503,
+            "Firebase is not configured. On Railway set FIREBASE_CREDENTIALS_JSON, "
+            "FIREBASE_WEB_API_KEY, FIREBASE_PROJECT_ID, FIREBASE_APP_ID, and DEV_AUTH_BYPASS=false.",
+        )
+
+    raise HTTPException(401, "Sign in required. Missing Authorization Bearer token.")
 
 
 def require_export_quota(db: Session, auth: AuthContext) -> None:
@@ -151,10 +161,20 @@ def require_export_quota(db: Session, auth: AuthContext) -> None:
 def auth_status_payload() -> dict:
     ready = firebase_ready()
     cfg = web_config_public()
+    init_err = None
+    if not ready and firebase_configured():
+        try:
+            get_firebase_app()
+        except Exception as exc:
+            init_err = str(exc)
+        init_err = init_err or firebase_init_error()
     return {
         "firebase_ready": ready,
+        "firebase_configured": firebase_configured(),
+        "firebase_error": init_err,
         "auth_required": auth_required(),
-        "dev_auth_bypass": settings.dev_auth_bypass and not ready,
+        "dev_auth_bypass": bool(settings.dev_auth_bypass),
         "web_config": cfg if cfg.get("apiKey") and cfg.get("projectId") else None,
+        "web_config_complete": bool(cfg.get("apiKey") and cfg.get("projectId") and cfg.get("appId")),
         "free_exports_per_day": settings.free_exports_per_day,
     }

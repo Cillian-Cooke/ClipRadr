@@ -45,7 +45,13 @@ export function renderLogin() {
 
   const form = el("div", { class: "auth-card" }, [
     el("div", { class: "brand", style: "margin-bottom:18px;" }, [
-      el("div", { class: "brand-mark", text: "CR" }),
+      el("img", {
+        class: "brand-logo",
+        src: "/assets/logo.png",
+        alt: "ClipRadr",
+        width: "36",
+        height: "36",
+      }),
       el("div", {}, [
         el("div", { class: "brand-name", text: "ClipRadr" }),
         el("div", { class: "brand-sub", text: "Sign in" }),

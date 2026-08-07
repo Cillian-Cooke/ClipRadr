@@ -1,7 +1,9 @@
-import { api, formatTime, downloadAuthed } from "../api.js";
-import { navigate } from "../router.js";
+import { api, formatTime } from "../api.js";
 import { el, loading, error } from "../components/Sidebar.js";
 import { store } from "/js/store.js";
+import { bindLivePage } from "../live.js";
+import { startBackgroundExport, subscribeExports } from "/js/exports.js";
+import { navigate } from "../router.js";
 
 const MAX_CLIP_SECONDS = 120;
 const DEFAULT_CLIP_SECONDS = 30;
@@ -888,7 +890,7 @@ function openExportModal(state) {
   const progress = el("div", { class: "progress-bar" }, [el("span")]);
   const status = el("div", {
     class: "muted",
-    text: "Ready — fetches the selected range from YouTube.",
+    text: "Ready — fetch continues in the sidebar so you can keep browsing.",
   });
   const sizeLabel = el("div", { class: "v", text: "" });
   const qualityBar = el("div", { class: "filter-bar", style: "margin:8px 0 0;" });
@@ -918,32 +920,19 @@ function openExportModal(state) {
   };
   paintQuality();
 
-  const downloadBtn = el("button", {
-    class: "btn btn-primary",
-    text: "Download Clip",
-    style: "display:none;",
-  });
-  let downloadUrl = null;
-  downloadBtn.addEventListener("click", async () => {
-    if (!downloadUrl) return;
-    downloadBtn.disabled = true;
-    downloadBtn.textContent = "Downloading…";
-    try {
-      await downloadAuthed(downloadUrl, `clipradr_${state.video.id}_${Math.round(state.clipStart)}.mp4`);
-      downloadBtn.textContent = "Download Clip";
-      downloadBtn.disabled = false;
-    } catch (err) {
-      status.textContent = err.message;
-      downloadBtn.textContent = "Download Clip";
-      downloadBtn.disabled = false;
-    }
-  });
   const dur = Math.round(state.clipEnd - state.clipStart);
+  let unsubJob = null;
+  let activeJobId = null;
+
+  const close = () => {
+    if (typeof unsubJob === "function") unsubJob();
+    backdrop.remove();
+  };
 
   const modal = el("div", { class: "modal" }, [
     el("h2", { text: "Export clip" }),
     el("p", {
-      text: "Downloads only the selected range from YouTube, then encodes an MP4.",
+      text: "Starts a YouTube range download. Progress shows in the left sidebar — close this and keep working.",
     }),
     el("div", { class: "export-summary" }, [
       summary("Range", `${formatTime(state.clipStart)} → ${formatTime(state.clipEnd)}`),
@@ -960,8 +949,7 @@ function openExportModal(state) {
     progress,
     status,
     el("div", { class: "modal-actions" }, [
-      el("button", { class: "btn", text: "Close", onclick: () => backdrop.remove() }),
-      downloadBtn,
+      el("button", { class: "btn", text: "Close", onclick: close }),
       el("button", {
         class: "btn btn-primary",
         text: "Generate",
@@ -969,8 +957,8 @@ function openExportModal(state) {
           const btn = e.currentTarget;
           btn.disabled = true;
           const q = EXPORT_QUALITIES.find((x) => x.height === quality) || EXPORT_QUALITIES[2];
-          status.textContent = `Fetching ${q.label} clip from YouTube…`;
-          progress.firstChild.style.width = "15%";
+          status.textContent = `Starting ${q.label} download in sidebar…`;
+          progress.firstChild.style.width = "12%";
           try {
             let start = state.clipStart;
             let end = state.clipEnd;
@@ -983,36 +971,45 @@ function openExportModal(state) {
                 start = Math.min(start, end - 0.5);
               }
             }
-            let job = await api.exportClip({
-              video_id: state.video.id,
-              moment_id: state.selected?.id,
-              start_seconds: start,
-              end_seconds: end,
-              aspect_ratio: YT_ASPECT,
-              quality: q.height,
-              width: Math.round((q.height * 16) / 9),
-              height: q.height,
-              crop_position: "CENTER",
+            const title = (state.video.title || "Clip").slice(0, 42);
+            const job = await startBackgroundExport({
+              body: {
+                video_id: state.video.id,
+                moment_id: state.selected?.id,
+                start_seconds: start,
+                end_seconds: end,
+                aspect_ratio: YT_ASPECT,
+                quality: q.height,
+                width: Math.round((q.height * 16) / 9),
+                height: q.height,
+                crop_position: "CENTER",
+              },
+              label: `${q.label} · ${title}`,
+              filename: `clipradr_${state.video.id}_${Math.round(state.clipStart)}.mp4`,
+              qualityLabel: q.label,
             });
-            while (job.status === "QUEUED" || job.status === "PROCESSING") {
-              await sleep(450);
-              job = await api.exportStatus(job.id);
-              const p = Math.max(job.progress || 0, 12);
-              progress.firstChild.style.width = `${p}%`;
-              if (p < 35) status.textContent = `Fetching ${q.label} from YouTube… ${p}%`;
-              else if (p < 75) status.textContent = `Downloading section… ${p}%`;
-              else if (p < 100) status.textContent = `Finalizing MP4… ${p}%`;
-              else status.textContent = `Almost done… ${p}%`;
-            }
-            if (job.status === "COMPLETED") {
-              progress.firstChild.style.width = "100%";
-              status.textContent = `Ready — ${q.label}.`;
-              downloadBtn.style.display = "inline-flex";
-              downloadUrl = job.download_url;
-            } else {
-              status.textContent = job.error || "Export failed.";
-              btn.disabled = false;
-            }
+            activeJobId = job.id;
+            status.textContent = "Downloading in the sidebar — you can close this.";
+            if (typeof unsubJob === "function") unsubJob();
+            unsubJob = subscribeExports((jobs) => {
+              const cur = jobs.find((j) => j.id === activeJobId);
+              if (!cur || !backdrop.isConnected) return;
+              const p = Math.max(cur.progress || 0, 12);
+              progress.firstChild.style.width = `${cur.status === "COMPLETED" ? 100 : p}%`;
+              if (cur.status === "QUEUED" || cur.status === "PROCESSING") {
+                status.textContent = `Sidebar download… ${Math.round(p)}% — safe to close.`;
+              } else if (cur.status === "COMPLETED") {
+                status.textContent = "Ready in the sidebar — click Save there.";
+                progress.firstChild.style.width = "100%";
+              } else if (cur.status === "FAILED") {
+                status.textContent = cur.error || "Export failed.";
+                btn.disabled = false;
+              }
+            });
+            // Auto-close shortly so browsing feels uninterrupted.
+            setTimeout(() => {
+              if (backdrop.isConnected) close();
+            }, 900);
           } catch (err) {
             status.textContent = err.message;
             btn.disabled = false;
@@ -1022,6 +1019,9 @@ function openExportModal(state) {
     ]),
   ]);
   backdrop.append(modal);
+  backdrop.addEventListener("click", (ev) => {
+    if (ev.target === backdrop) close();
+  });
   document.body.append(backdrop);
 }
 

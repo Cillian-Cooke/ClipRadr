@@ -8,13 +8,13 @@
   --text: #171a21;
   --text-muted: #5a6475;
   --text-dim: #8a93a3;
-  --accent: #e36a1a;
-  --accent-dim: rgba(227, 106, 26, 0.12);
-  --accent-strong: #c45a12;
+  --accent: #f01519;
+  --accent-dim: rgba(240, 21, 25, 0.12);
+  --accent-strong: #c81014;
   --success: #1f9d63;
   --warning: #c98a12;
   --danger: #d64545;
-  --high: #e36a1a;
+  --high: #f01519;
   --medium: #c98a12;
   --low: #3b78d8;
   --sidebar-w: 220px;
@@ -154,7 +154,7 @@ img {
 
 .badge-high {
   color: var(--accent-strong);
-  border-color: rgba(227, 106, 26, 0.3);
+  border-color: rgba(240, 21, 25, 0.3);
   background: var(--accent-dim);
 }
 
@@ -264,7 +264,7 @@ img {
 }
 
 .chip.active {
-  border-color: rgba(227, 106, 26, 0.45);
+  border-color: rgba(240, 21, 25, 0.45);
   color: var(--accent-strong);
   background: var(--accent-dim);
 }
@@ -280,7 +280,7 @@ img {
   place-items: center;
   padding: 24px;
   background:
-    radial-gradient(ellipse at 20% 0%, rgba(227, 106, 26, 0.12), transparent 50%),
+    radial-gradient(ellipse at 20% 0%, rgba(240, 21, 25, 0.12), transparent 50%),
     var(--bg);
 }
 

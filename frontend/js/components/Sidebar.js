@@ -1,14 +1,19 @@
 import { store } from "/js/store.js";
 import { openAddCreatorModal } from "./AddCreator.js";
 import { api } from "../api.js";
+import {
+  subscribeExports,
+  dismissExportJob,
+  downloadExportJob,
+} from "/js/exports.js";
 
 const NAV = [
   { href: "/home", label: "Home", icon: "⌂" },
-  { href: "/creators", label: "Creators", icon: "◎" },
-  { href: "/clips", label: "Clip Opportunities", icon: "◆" },
   { href: "/videos", label: "Videos", icon: "▶" },
-  { href: "/saved", label: "Saved Clips", icon: "★" },
+  { href: "/clips", label: "Clip Opportunities", icon: "◆" },
 ];
+
+let unsubExports = null;
 
 export function renderShell(
   activePath,
@@ -21,15 +26,26 @@ export function renderShell(
   const shell = el("div", { class: "app-shell" });
   const sidebar = el("aside", { class: "sidebar" });
 
-  sidebar.append(
-    el("div", { class: "brand" }, [
-      el("div", { class: "brand-mark", text: "CR" }),
-      el("div", {}, [
-        el("div", { class: "brand-name", text: "ClipRadr" }),
-        el("div", { class: "brand-sub", text: "Editor Workstation" }),
-      ]),
+  const brand = el("a", {
+    class: "brand",
+    href: "/home",
+    "data-link": "1",
+    "aria-label": "ClipRadr home",
+  });
+  brand.append(
+    el("img", {
+      class: "brand-logo",
+      src: "/assets/logo.png",
+      alt: "ClipRadr",
+      width: "36",
+      height: "36",
+    }),
+    el("div", {}, [
+      el("div", { class: "brand-name", text: "ClipRadr" }),
+      el("div", { class: "brand-sub", text: "Editor Workstation" }),
     ])
   );
+  sidebar.append(brand);
 
   const nav = el("nav", { class: "nav" });
   for (const item of NAV) {
@@ -49,48 +65,104 @@ export function renderShell(
   }
   sidebar.append(nav);
 
-  const footer = el("div", { class: "sidebar-footer" });
-  const scanPill = el("div", { class: "demo-pill", text: "Idle" });
-  const updatePill = () => {
-    const { pending, busy } = store.scanProgress();
-    const creators = store.get().creators || [];
-    const moments = store.get().home?.stats?.clip_moments_found || 0;
-    const videos = store.get().home?.stats?.videos_scanned || 0;
+  const downloads = el("div", {
+    class: "sidebar-downloads",
+    hidden: true,
+  });
+  sidebar.append(downloads);
 
-    if (busy || pending > 0) {
-      scanPill.textContent = `Scanning ${pending} video${pending === 1 ? "" : "s"}…`;
-      scanPill.classList.add("scanning");
-    } else if (creators.length) {
-      scanPill.textContent =
-        moments > 0
-          ? `${moments} moments · live`
-          : videos > 0
-            ? `${videos} videos · ready`
-            : `${creators.length} creator${creators.length === 1 ? "" : "s"}`;
-      scanPill.classList.remove("scanning");
-    } else {
-      scanPill.textContent = "Ready";
-      scanPill.classList.remove("scanning");
+  if (typeof unsubExports === "function") {
+    try {
+      unsubExports();
+    } catch {
+      /* ignore */
     }
-  };
-  updatePill();
-  store.subscribe(updatePill);
-  footer.append(scanPill);
+  }
+  unsubExports = subscribeExports((jobs) => paintDownloads(downloads, jobs));
+
+  const footer = el("div", { class: "sidebar-footer" });
+
+  const accountBox = el("div", { class: "sidebar-account" });
+  const accountLabel = el("div", {
+    class: "sidebar-account-label",
+    text: "Account",
+  });
+  const accountEmail = el("div", {
+    class: "sidebar-account-email",
+    text: "Loading…",
+  });
+  const accountActions = el("div", { class: "sidebar-account-actions" });
+  accountBox.append(accountLabel, accountEmail, accountActions);
+  footer.append(accountBox);
+
   footer.append(
-    el("a", { href: "/settings", "data-link": "1", class: activePath === "/settings" ? "active" : "" }, [
+    el("a", {
+      href: "/settings",
+      "data-link": "1",
+      class: `btn btn-settings ${activePath === "/settings" ? "active" : ""}`,
+    }, [
       el("span", { class: "nav-icon", text: "⚙" }),
       el("span", { class: "label", text: "Settings" }),
     ])
   );
   sidebar.append(footer);
 
+  import("/js/auth.js").then(async ({ getUser, signOut, onAuthChange, isSignedIn }) => {
+    const paintAccount = async () => {
+      accountActions.replaceChildren();
+      const user = getUser();
+      if (!isSignedIn() && !user) {
+        accountEmail.textContent = "Not signed in";
+        return;
+      }
+      try {
+        const me = await api.me();
+        const email =
+          me.email ||
+          user?.email ||
+          me.display_name ||
+          user?.displayName ||
+          "Signed in";
+        accountEmail.textContent = email;
+        accountEmail.title = email;
+        if (!me.bypass) {
+          accountActions.append(
+            el("button", {
+              class: "btn btn-sm btn-logout",
+              text: "Log out",
+              onclick: async () => {
+                await signOut();
+                window.location.replace("/login");
+              },
+            })
+          );
+        } else {
+          accountEmail.textContent = me.email || "Local workspace";
+        }
+      } catch {
+        accountEmail.textContent = user?.email || "Signed in";
+        accountActions.append(
+          el("button", {
+            class: "btn btn-sm btn-logout",
+            text: "Log out",
+            onclick: async () => {
+              await signOut();
+              window.location.replace("/login");
+            },
+          })
+        );
+      }
+    };
+    paintAccount();
+    onAuthChange(() => paintAccount());
+  }).catch(() => {
+    accountEmail.textContent = "Account unavailable";
+  });
+
   const main = el("main", { class: "main" });
   const topbar = el("div", { class: "topbar" });
 
-  const accountWrap = el("div", {
-    class: "topbar-account",
-    style: "display:flex;align-items:center;gap:8px;margin-left:auto;",
-  });
+  const accountWrap = el("div", { class: "topbar-account" });
   accountWrap.append(
     el("button", {
       class: "btn btn-primary btn-sm",
@@ -103,41 +175,6 @@ export function renderShell(
   );
   topbar.append(accountWrap);
 
-  import("/js/auth.js").then(async ({ getUser, signOut, onAuthChange, isSignedIn }) => {
-    const paint = async () => {
-      accountWrap.replaceChildren(
-        el("button", {
-          class: "btn btn-primary btn-sm",
-          text: "+ Add Creator",
-          onclick: () =>
-            openAddCreatorModal({
-              onDone: () => store.bumpData("creator-added"),
-            }),
-        })
-      );
-      if (!isSignedIn() && !getUser()) return;
-      try {
-        const me = await api.me();
-        if (!me.bypass) {
-          accountWrap.append(
-            el("button", {
-              class: "btn btn-sm",
-              text: "Sign out",
-              onclick: async () => {
-                await signOut();
-                window.location.replace("/login");
-              },
-            })
-          );
-        }
-      } catch {
-        /* signed-in UI optional */
-      }
-    };
-    paint();
-    onAuthChange(() => paint());
-  }).catch(() => {});
-
   if (topbarExtra) topbar.append(topbarExtra);
 
   const content = el("div", { class: `content ${contentClass}`.trim() });
@@ -148,6 +185,98 @@ export function renderShell(
   app.append(shell);
 }
 
+function paintDownloads(host, jobs) {
+  if (!host.isConnected) return;
+  host.replaceChildren();
+  if (!jobs.length) {
+    host.hidden = true;
+    return;
+  }
+  host.hidden = false;
+  host.append(el("div", { class: "sidebar-downloads-title", text: "Downloads" }));
+
+  for (const job of jobs) {
+    const busy = job.status === "QUEUED" || job.status === "PROCESSING";
+    const done = job.status === "COMPLETED";
+    const failed = job.status === "FAILED";
+    const pct = Math.min(100, Math.max(busy ? 8 : 0, Number(job.progress) || 0));
+
+    const card = el("div", {
+      class: `sidebar-download-card ${busy ? "is-busy" : ""} ${done ? "is-done" : ""} ${failed ? "is-failed" : ""}`,
+    });
+
+    const head = el("div", { class: "sidebar-download-head" });
+    if (busy) {
+      head.append(el("span", { class: "sidebar-download-spinner", "aria-hidden": "true" }));
+    } else if (done) {
+      head.append(el("span", { class: "sidebar-download-check", text: "✓" }));
+    } else {
+      head.append(el("span", { class: "sidebar-download-check", text: "!" }));
+    }
+    head.append(
+      el("div", { class: "sidebar-download-meta" }, [
+        el("div", {
+          class: "sidebar-download-label",
+          text: job.label || "Clip export",
+          title: job.label || "Clip export",
+        }),
+        el("div", {
+          class: "sidebar-download-status",
+          text: busy
+            ? `Downloading… ${Math.round(pct)}%`
+            : done
+              ? "Ready"
+              : job.error || "Failed",
+        }),
+      ])
+    );
+    card.append(head);
+
+    if (busy || done) {
+      card.append(
+        el("div", { class: "sidebar-download-bar" }, [
+          el("span", { style: `width:${done ? 100 : pct}%` }),
+        ])
+      );
+    }
+
+    const actions = el("div", { class: "sidebar-download-actions" });
+    if (done && job.download_url) {
+      actions.append(
+        el("button", {
+          class: "btn btn-primary btn-sm",
+          text: "Save",
+          type: "button",
+          onclick: async (e) => {
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            btn.textContent = "Saving…";
+            try {
+              await downloadExportJob(job.id);
+              btn.textContent = "Saved";
+            } catch (err) {
+              btn.disabled = false;
+              btn.textContent = "Save";
+              alert(err.message || "Download failed");
+            }
+          },
+        })
+      );
+    }
+    if (done || failed) {
+      actions.append(
+        el("button", {
+          class: "btn btn-sm",
+          text: "Dismiss",
+          type: "button",
+          onclick: () => dismissExportJob(job.id),
+        })
+      );
+    }
+    if (actions.childNodes.length) card.append(actions);
+    host.append(card);
+  }
+}
 
 export function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);

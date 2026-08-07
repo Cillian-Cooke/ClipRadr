@@ -3,7 +3,6 @@ import { navigate, route, dispatch, normalizePath } from "/js/router.js";
 import { renderShell, el } from "/js/components/Sidebar.js";
 import { renderLanding } from "/js/pages/landing.js";
 import { renderHome } from "/js/pages/home.js";
-import { renderCreators } from "/js/pages/creators.js";
 import { renderCreator } from "/js/pages/creator.js";
 import { renderVideo } from "/js/pages/video.js";
 import { renderClips } from "/js/pages/clips.js";
@@ -99,8 +98,11 @@ route("/login", () => {
 });
 
 route("/home", () => mount("/home", renderHome));
-route("/creators", () => mount("/creators", renderCreators));
-route("/creator/:id", ({ id }) => mount("/creators", (root) => renderCreator(root, id)));
+route("/creators", () => {
+  history.replaceState({}, "", "/home");
+  mount("/home", renderHome);
+});
+route("/creator/:id", ({ id }) => mount("/home", (root) => renderCreator(root, id)));
 route("/video/:id", ({ id }) => {
   if (requireAuthGate(`/video/${id}`)) {
     history.replaceState({}, "", "/login");

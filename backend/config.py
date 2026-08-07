@@ -47,8 +47,10 @@ class Settings(BaseSettings):
     firebase_storage_bucket: str = ""
     firebase_messaging_sender_id: str = ""
     firebase_app_id: str = ""
-    # When Firebase is unset, allow demo-user bypass so local work continues
-    dev_auth_bypass: bool = True
+    # When Firebase is unset, allow demo-user bypass so local work continues.
+    # Production (Railway): leave false and set FIREBASE_CREDENTIALS_JSON.
+    # Default false so cloud deploys don't silently stay in bypass if vars are incomplete.
+    dev_auth_bypass: bool = False
     free_exports_per_day: int = 3
 
     # yt-dlp YouTube auth (needed on cloud IPs that trip bot checks)

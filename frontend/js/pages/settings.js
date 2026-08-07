@@ -80,10 +80,26 @@ export async function renderSettings(root) {
 
         card(
           "Firebase",
-          auth.firebase_ready ? "Admin ready" : "Not configured",
+          auth.firebase_ready
+            ? "Admin ready"
+            : auth.firebase_configured
+              ? "Configured but failed to start"
+              : "Not configured",
           auth.firebase_ready
             ? "Auth tokens verified; users/exports mirrored to Firestore."
-            : "Add service account + web config to .env (see .env.example). Until then, local bypass stays on.",
+            : [
+                auth.firebase_error ||
+                  "Railway needs FIREBASE_CREDENTIALS_JSON (paste service-account JSON), web config vars, and DEV_AUTH_BYPASS=false.",
+                !auth.web_config_complete
+                  ? "Also set FIREBASE_WEB_API_KEY + FIREBASE_APP_ID so the browser can sign in."
+                  : null,
+                auth.dev_auth_bypass
+                  ? "DEV_AUTH_BYPASS is true — turn it false on Railway after Firebase works."
+                  : null,
+                "Local helper: bash scripts/print_railway_firebase_env.sh",
+              ]
+                .filter(Boolean)
+                .join(" "),
           !!auth.firebase_ready
         ),
 

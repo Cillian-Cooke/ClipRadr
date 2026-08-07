@@ -115,13 +115,22 @@ def _ffmpeg_location_dir() -> str | None:
     return str(link_dir)
 
 
-# Progressive 360p when available; otherwise merge DASH up to max_height.
+# Prefer H.264 MP4 up to max_height; avoid format 18 (360p) as a silent downgrade.
 def _format_selector(max_height: int = 720) -> str:
     h = max(144, int(max_height or 720))
     return (
-        f"bv*[height<={h}]+ba/b[height<={h}]/"
-        f"bv*[height<=720]+ba/b[height<=720]/18/bv*+ba/b"
+        f"bv*[height<={h}][vcodec^=avc1]+ba/"
+        f"bv*[height<={h}][ext=mp4]+ba/"
+        f"bv*[height<={h}]+ba/"
+        f"b[height<={h}]/"
+        f"bv*+ba/b"
     )
+
+
+def _progressive_selector(max_height: int = 720) -> str:
+    """Single-file fallback that still respects the requested height."""
+    h = max(144, int(max_height or 720))
+    return f"b[height<={h}]/best[height<={h}]/best"
 
 
 # android_vr still returns real https URLs; android/web are often SABR-only.
@@ -166,6 +175,7 @@ def download_clip_section(
             ff_dir=ff_dir,
             clients=_PLAYER_CLIENTS,
             fmt=fmt,
+            max_height=height,
         )
     except YtDlpError as exc:
         errors.append(str(exc))
@@ -210,6 +220,7 @@ def _download_with_sections(
     ff_dir: str | None,
     clients: str,
     fmt: str,
+    max_height: int = 720,
 ) -> Path:
     section = f"*{start:.3f}-{end:.3f}"
     with tempfile.TemporaryDirectory(prefix="clipradr_yt_") as tmp:
@@ -239,7 +250,7 @@ def _download_with_sections(
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             err = (result.stderr or result.stdout or "yt-dlp section download failed").strip()
-            # Retry once with progressive-only + android_vr
+            # Retry with progressive stream at the same height — never force format 18 (360p).
             cmd_retry = [
                 *_ytdlp_cmd_prefix(),
                 "--no-playlist",
@@ -248,7 +259,7 @@ def _download_with_sections(
                 "--download-sections",
                 section,
                 "-f",
-                "18/best",
+                _progressive_selector(max_height),
                 "--merge-output-format",
                 "mp4",
                 "--extractor-args",

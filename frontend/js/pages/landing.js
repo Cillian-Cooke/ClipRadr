@@ -6,7 +6,13 @@ export function renderLanding() {
   const page = el("div", { class: "landing" }, [
     el("div", { class: "landing-copy" }, [
       el("div", { class: "brand" }, [
-        el("div", { class: "brand-mark", text: "CR" }),
+        el("img", {
+          class: "brand-logo",
+          src: "/assets/logo.png",
+          alt: "ClipRadr",
+          width: "36",
+          height: "36",
+        }),
         el("div", { class: "brand-name", text: "ClipRadr" }),
       ]),
       el("h1", { text: "Find the moments worth clipping." }),
@@ -22,7 +28,7 @@ export function renderLanding() {
         el("button", {
           class: "btn",
           text: "Add a creator",
-          onclick: () => navigate("/creators"),
+          onclick: () => navigate("/home"),
         }),
       ]),
     ]),
