@@ -1,16 +1,47 @@
-import { getIdToken } from "./auth.js";
+import { getIdToken, forceLogout, isSignedIn, isSessionLocked } from "/js/auth.js";
+import { store } from "/js/store.js";
 
-async function request(path, options = {}) {
+const PUBLIC_PATHS = new Set(["/api/health", "/api/status"]);
+
+function authIsRequired() {
+  return !!store.get()?.status?.auth?.auth_required;
+}
+
+function isPublicApi(path) {
+  const bare = path.split("?")[0];
+  return PUBLIC_PATHS.has(bare);
+}
+
+async function request(path, options = {}, { _retried = false } = {}) {
   const headers = {
     "Content-Type": "application/json",
     ...(options.headers || {}),
   };
+
+  let token = null;
   try {
-    const token = await getIdToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
+    token = await getIdToken(_retried);
   } catch {
-    /* no auth yet */
+    token = null;
   }
+
+  if (authIsRequired() && !isPublicApi(path) && !token) {
+    for (let i = 0; i < 8 && !token; i++) {
+      await new Promise((r) => setTimeout(r, 200));
+      token = await getIdToken(true);
+    }
+  }
+
+  if (authIsRequired() && !isPublicApi(path) && !token) {
+    // Never kick a locked session for a transient token gap.
+    if (isSessionLocked() || isSignedIn()) {
+      throw new Error("Auth token unavailable — retry in a moment");
+    }
+    await forceLogout("Missing Authorization Bearer token");
+    throw new Error("Sign in required");
+  }
+
+  if (token) headers.Authorization = `Bearer ${token}`;
 
   const res = await fetch(path, {
     ...options,
@@ -23,6 +54,26 @@ async function request(path, options = {}) {
   } catch {
     data = { detail: text };
   }
+
+  if (res.status === 401) {
+    if (!_retried) {
+      try {
+        const refreshed = await getIdToken(true);
+        if (refreshed) {
+          return request(path, options, { _retried: true });
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+    const detail = typeof data?.detail === "string" ? data.detail : "";
+    // Only hard-logout on explicit invalid-token responses.
+    if (/invalid auth token|sign in required|missing authorization/i.test(detail)) {
+      await forceLogout(detail || "Unauthorized — signed out");
+    }
+    throw new Error(detail || "Unauthorized");
+  }
+
   if (!res.ok) {
     const msg = data?.detail || data?.message || res.statusText;
     throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
@@ -33,13 +84,45 @@ async function request(path, options = {}) {
 /** Download a protected file using the Firebase ID token. */
 export async function downloadAuthed(url, filename = "clip.mp4") {
   const headers = {};
+  let token = null;
   try {
-    const token = await getIdToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
+    token = await getIdToken();
   } catch {
-    /* bypass mode */
+    token = null;
   }
+  if (authIsRequired() && !token) {
+    if (isSessionLocked() || isSignedIn()) {
+      throw new Error("Auth token unavailable — retry in a moment");
+    }
+    await forceLogout("Missing Authorization Bearer token");
+    throw new Error("Sign in required");
+  }
+  if (token) headers.Authorization = `Bearer ${token}`;
+
   const res = await fetch(url, { headers });
+  if (res.status === 401) {
+    const refreshed = await getIdToken(true);
+    if (refreshed && refreshed !== token) {
+      headers.Authorization = `Bearer ${refreshed}`;
+      const retry = await fetch(url, { headers });
+      if (retry.ok) {
+        const blob = await retry.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = objectUrl;
+        a.download = filename;
+        document.body.append(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(objectUrl);
+        return;
+      }
+    }
+    if (!isSessionLocked()) {
+      await forceLogout("Unauthorized download — signed out");
+    }
+    throw new Error("Unauthorized");
+  }
   if (!res.ok) {
     const text = await res.text();
     let msg = text;
@@ -66,7 +149,13 @@ export const api = {
   health: () => request("/api/health"),
   creators: () => request("/api/creators"),
   creator: (id) => request(`/api/creators/${id}`),
-  creatorVideos: (id) => request(`/api/creators/${id}/videos`),
+  creatorVideos: (id, { excludeShorts } = {}) => {
+    const params = new URLSearchParams();
+    if (excludeShorts === false) params.set("exclude_shorts", "false");
+    else if (excludeShorts === true) params.set("exclude_shorts", "true");
+    const qs = params.toString();
+    return request(`/api/creators/${id}/videos${qs ? `?${qs}` : ""}`);
+  },
   addCreator: (payload) =>
     request("/api/creators", {
       method: "POST",
@@ -106,6 +195,8 @@ export async function withRetry(fn, { tries = 3, delayMs = 700, label = "Request
     } catch (e) {
       lastErr = e;
       const msg = String(e?.message || e);
+      // Never retry auth failures — forceLogout already handled them.
+      if (/sign in required|unauthorized|401|missing authorization/i.test(msg)) break;
       const retryable =
         /failed to fetch|network|timeout|502|503|504|cloudflare|temporar|econnreset|socket/i.test(
           msg
@@ -116,7 +207,6 @@ export async function withRetry(fn, { tries = 3, delayMs = 700, label = "Request
   }
   throw lastErr || new Error(`${label} failed`);
 }
-
 
 export function formatTime(seconds) {
   seconds = Math.max(0, Math.floor(Number(seconds) || 0));

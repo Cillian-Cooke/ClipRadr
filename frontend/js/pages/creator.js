@@ -1,26 +1,40 @@
 import { api, formatTime } from "../api.js";
 import { navigate } from "../router.js";
 import { el, loading, error } from "../components/Sidebar.js";
-import { store } from "../store.js";
+import { store } from "/js/store.js";
 import { bindLivePage } from "../live.js";
-import { kickBackgroundScans, removeCreatorFollow } from "../background.js";
+import { kickBackgroundScans, removeCreatorFollow } from "/js/background.js";
 import { refreshWorkspace } from "../refresh.js";
+import {
+  getExcludeShortsPref,
+  setExcludeShortsPref,
+  isShortVideo,
+  renderLengthFilterBar,
+} from "../videoFilters.js";
 
 export async function renderCreator(root, id) {
+  let excludeShorts = getExcludeShortsPref();
+
   bindLivePage(root, async ({ silent }) => {
     if (!silent) root.replaceChildren(loading());
     try {
-      await draw(root, id);
+      await draw(root, id, {
+        excludeShorts,
+        setExcludeShorts: (on) => {
+          excludeShorts = on;
+          setExcludeShortsPref(on);
+        },
+      });
     } catch (e) {
       if (!silent) root.replaceChildren(error(e.message));
     }
   });
 }
 
-async function draw(root, id) {
+async function draw(root, id, { excludeShorts, setExcludeShorts }) {
   const [creator, videosRes, status] = await Promise.all([
     api.creator(id),
-    api.creatorVideos(id),
+    api.creatorVideos(id, { excludeShorts }),
     api.status().catch(() => null),
   ]);
   store.setCreatorVideos(id, videosRes.videos || []);
@@ -53,8 +67,9 @@ async function draw(root, id) {
           e.currentTarget.disabled = true;
           e.currentTarget.textContent = "Queuing…";
           try {
-            const vids = (videosRes.videos || [])
-              .filter((v) => !v.is_demo)
+            const all = await api.creatorVideos(id, { excludeShorts: false });
+            const vids = (all.videos || [])
+              .filter((v) => !v.is_demo && !isShortVideo(v))
               .map((v) => v.id);
             store.enqueueScans(vids, { front: true });
             kickBackgroundScans();
@@ -134,9 +149,37 @@ async function draw(root, id) {
     );
   }
 
-  wrap.append(el("div", { class: "section-title", text: "Recent Videos" }));
+  wrap.append(
+    renderLengthFilterBar(el, {
+      excludeShorts,
+      onChange: (on) => {
+        setExcludeShorts(on);
+        draw(root, id, { excludeShorts: on, setExcludeShorts }).catch((err) => {
+          root.replaceChildren(error(err.message));
+        });
+      },
+    })
+  );
+
+  const shortsHidden = videosRes.shorts_hidden || 0;
+  wrap.append(
+    el("div", {
+      class: "section-title",
+      text: excludeShorts ? "Recent long-form videos" : "Recent Videos",
+    })
+  );
+  if (excludeShorts && shortsHidden) {
+    wrap.append(
+      el("p", {
+        class: "muted",
+        style: "margin:-4px 0 12px;",
+        text: `Hiding ${shortsHidden} Short${shortsHidden === 1 ? "" : "s"} (under 3 min / #shorts).`,
+      })
+    );
+  }
+
   const grid = el("div", { class: "video-grid" });
-  for (const v of videosRes.videos) {
+  for (const v of videosRes.videos || []) {
     const thumb = el("div", { class: "video-thumb" });
     if (v.thumbnail_url && !v.thumbnail_url.endsWith(".svg")) {
       thumb.append(
@@ -204,6 +247,18 @@ async function draw(root, id) {
     row.append(buttons);
     grid.append(row);
   }
-  wrap.append(grid);
+  if (!(videosRes.videos || []).length) {
+    wrap.append(
+      el("p", {
+        class: "muted",
+        text:
+          excludeShorts && shortsHidden
+            ? "No long-form videos in the recent window. Try Include Shorts or Refresh videos."
+            : "No videos imported yet. Click Refresh videos.",
+      })
+    );
+  } else {
+    wrap.append(grid);
+  }
   root.replaceChildren(wrap);
 }

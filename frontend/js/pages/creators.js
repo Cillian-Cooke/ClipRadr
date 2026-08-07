@@ -2,9 +2,9 @@ import { api } from "../api.js";
 import { navigate } from "../router.js";
 import { el, loading, error, empty } from "../components/Sidebar.js";
 import { openAddCreatorModal } from "../components/AddCreator.js";
-import { store } from "../store.js";
+import { store } from "/js/store.js";
 import { bindLivePage } from "../live.js";
-import { removeCreatorFollow } from "../background.js";
+import { removeCreatorFollow } from "/js/background.js";
 
 export async function renderCreators(root) {
   bindLivePage(root, async ({ silent }) => {

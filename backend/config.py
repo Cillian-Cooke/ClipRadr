@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     cluster_window_seconds: int = 10
     cluster_radius_seconds: int = 5
     max_cluster_span_seconds: int = 15
-    pre_roll_seconds: int = 10
+    pre_roll_seconds: int = 5
     post_roll_seconds: int = 10
     similarity_threshold: float = 0.78
     # Keep serverless requests short — scan videos one-at-a-time from the UI

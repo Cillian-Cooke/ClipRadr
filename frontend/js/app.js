@@ -1,64 +1,101 @@
-import { api, formatTime } from "./api.js";
-import { navigate, route, dispatch } from "./router.js";
-import { renderShell, el } from "./components/Sidebar.js";
-import { renderLanding } from "./pages/landing.js";
-import { renderHome } from "./pages/home.js";
-import { renderCreators } from "./pages/creators.js";
-import { renderCreator } from "./pages/creator.js";
-import { renderVideo } from "./pages/video.js";
-import { renderClips } from "./pages/clips.js";
-import { renderSaved } from "./pages/saved.js";
-import { renderSearch } from "./pages/search.js";
-import { renderSettings } from "./pages/settings.js";
-import { renderVideosIndex } from "./pages/videos.js";
-import { renderLogin } from "./pages/login.js";
-import { store } from "./store.js";
-import { initAuth, onAuthChange, isSignedIn, getUser } from "./auth.js";
+import { api, formatTime } from "/js/api.js";
+import { navigate, route, dispatch, normalizePath } from "/js/router.js";
+import { renderShell, el } from "/js/components/Sidebar.js";
+import { renderLanding } from "/js/pages/landing.js";
+import { renderHome } from "/js/pages/home.js";
+import { renderCreators } from "/js/pages/creators.js";
+import { renderCreator } from "/js/pages/creator.js";
+import { renderVideo } from "/js/pages/video.js";
+import { renderClips } from "/js/pages/clips.js";
+import { renderSaved } from "/js/pages/saved.js";
+import { renderSearch } from "/js/pages/search.js";
+import { renderSettings } from "/js/pages/settings.js";
+import { renderVideosIndex } from "/js/pages/videos.js";
+import { renderLogin } from "/js/pages/login.js";
+import { store } from "/js/store.js";
+import {
+  initAuth,
+  onAuthChange,
+  isSignedIn,
+  getUser,
+  hasCachedFirebaseSession,
+  isSessionLocked,
+} from "/js/auth.js";
 import {
   startBackgroundWorker,
   restoreFollowedCreators,
   kickBackgroundScans,
-} from "./background.js";
+} from "/js/background.js";
 
 let authRequired = false;
 let authReady = false;
+let workspaceStarted = false;
+let lastAuthUid = null;
+let mountedPath = null;
 
 function requireAuthGate(path) {
-  return authRequired && authReady && !isSignedIn() && path !== "/" && path !== "/login";
+  if (isSessionLocked() || isSignedIn()) return false;
+  return authRequired && authReady && path !== "/" && path !== "/login";
+}
+
+function currentPath() {
+  return normalizePath(window.location.pathname || "/");
+}
+
+function showBootLoading(message = "Restoring session…") {
+  const appEl = document.getElementById("app");
+  if (!appEl) return;
+  appEl.replaceChildren(el("div", { class: "loading-state", text: message }));
 }
 
 function mount(path, renderer) {
   if (requireAuthGate(path)) {
-    renderLogin();
     history.replaceState({}, "", "/login");
+    renderLogin();
+    mountedPath = "/login";
+    return;
+  }
+  // Idempotent: same route already on screen → do not remount (duplicate Sign out bug).
+  if (mountedPath === path && document.querySelector("#app .app-shell")) {
     return;
   }
   const root = el("div");
   renderShell(path, root);
   renderer(root);
+  mountedPath = path;
 }
 
 route("/", () => {
-  if (authRequired && authReady && !isSignedIn()) {
-    history.replaceState({}, "", "/login");
-    renderLogin();
+  if (!authReady && authRequired) {
+    showBootLoading();
     return;
   }
-  if (authRequired && authReady && isSignedIn()) {
+  if (authRequired && isSignedIn()) {
     history.replaceState({}, "", "/home");
     mount("/home", renderHome);
+    return;
+  }
+  if (authRequired) {
+    history.replaceState({}, "", "/login");
+    renderLogin();
+    mountedPath = "/login";
     return;
   }
   renderLanding();
 });
 
 route("/login", () => {
-  if (authReady && isSignedIn()) {
+  if (!authReady) {
+    showBootLoading();
+    return;
+  }
+  if (isSignedIn()) {
     history.replaceState({}, "", "/home");
     mount("/home", renderHome);
     return;
   }
   renderLogin();
+  mountedPath = "/login";
 });
 
 route("/home", () => mount("/home", renderHome));
@@ -68,11 +105,13 @@ route("/video/:id", ({ id }) => {
   if (requireAuthGate(`/video/${id}`)) {
     history.replaceState({}, "", "/login");
     renderLogin();
+    mountedPath = "/login";
     return;
   }
   const root = el("div");
   renderShell(`/video/${id}`, root, { contentClass: "workspace" });
   renderVideo(root, id);
+  mountedPath = `/video/${id}`;
 });
 route("/clips", () => mount("/clips", renderClips));
 route("/saved", () => mount("/saved", renderSaved));
@@ -80,20 +119,41 @@ route("/videos", () => mount("/videos", renderVideosIndex));
 route("/settings", () => mount("/settings", renderSettings));
 route("/search", () => mount("/search", renderSearch));
 
-function startWorkspaceSync() {
+function startWorkspaceSync({ force = false } = {}) {
   if (authRequired && !isSignedIn()) return;
   const user = getUser();
-  store.bindAccount(user?.uid || null);
+  const switched = store.bindAccount(user?.uid || null);
+  if (!force && workspaceStarted && !switched) {
+    kickBackgroundScans();
+    return;
+  }
+  workspaceStarted = true;
   restoreFollowedCreators()
     .catch((e) => console.warn("restore failed", e))
     .finally(() => kickBackgroundScans());
 }
 
+/**
+ * Enter the signed-in app.
+ * NEVER steal a deep link (e.g. /creators) back to /home on session restore.
+ */
+function enterSignedInApp({ preferHome = false } = {}) {
+  const path = currentPath();
+  const onAuthScreen = path === "/" || path === "/login" || path === "/login.html";
+
+  if (preferHome || onAuthScreen) {
+    history.replaceState({}, "", "/home");
+    mount("/home", renderHome);
+  } else if (!workspaceStarted) {
+    dispatch();
+  }
+  // If already mounted for this session, leave the DOM alone.
+  startWorkspaceSync();
+}
+
 async function boot() {
   startBackgroundWorker();
 
-  // Always show login chrome first so the page never looks broken
-  // while Firebase initializes.
   try {
     const status = await api.status();
     store.setStatus(status);
@@ -103,8 +163,9 @@ async function boot() {
   }
 
   if (authRequired) {
-    history.replaceState({}, "", "/login");
-    renderLogin();
+    showBootLoading(
+      hasCachedFirebaseSession() ? "Restoring session…" : "Starting ClipRadar…"
+    );
   } else {
     dispatch();
   }
@@ -116,42 +177,61 @@ async function boot() {
   } catch (e) {
     console.error("Auth init failed", e);
     authReady = true;
-    const appEl = document.getElementById("app");
-    if (authRequired && appEl) {
-      appEl.insertAdjacentHTML(
-        "beforeend",
-        `<p class="error-state" style="margin:16px">Firebase failed: ${e?.message || e}</p>`
-      );
+  }
+
+  lastAuthUid = getUser()?.uid || null;
+
+  // Single entry into the workspace after auth settles — do not also mount
+  // from the onAuthChange eager callback (that caused duplicate shells).
+  if (!authRequired || isSignedIn()) {
+    if (!authRequired) {
+      dispatch();
+      startWorkspaceSync();
+    } else {
+      const path = currentPath();
+      const onAuthScreen = path === "/" || path === "/login" || path === "/login.html";
+      enterSignedInApp({ preferHome: onAuthScreen });
     }
+  } else {
+    history.replaceState({}, "", "/login");
+    renderLogin();
+    mountedPath = "/login";
   }
 
   onAuthChange((user) => {
-    store.bindAccount(user?.uid || null);
-    if (authRequired && !user) {
-      window.location.replace("/login");
+    const uid = user?.uid || null;
+
+    if (!user) {
+      if (isSessionLocked()) return;
+      lastAuthUid = null;
+      workspaceStarted = false;
+      mountedPath = null;
+      store.bindAccount(null);
+      if (currentPath() !== "/login") history.replaceState({}, "", "/login");
+      renderLogin();
       return;
     }
-    if (user) {
-      history.replaceState({}, "", "/home");
-      mount("/home", renderHome);
-      startWorkspaceSync();
-    }
+
+    // Same user already running — ignore (tab focus restore).
+    if (uid === lastAuthUid && workspaceStarted) return;
+
+    const firstSignIn = !lastAuthUid;
+    lastAuthUid = uid;
+    // Only jump to Home when coming from a true signed-out state onto an auth screen.
+    // Session restore on /creators must stay on /creators.
+    enterSignedInApp({
+      preferHome: firstSignIn && (currentPath() === "/login" || currentPath() === "/"),
+    });
   });
 
-  window.__clipradarFallback = () => {
-    window.location.replace("/login");
-  };
-
-  if (!authRequired || isSignedIn()) {
-    if (!authRequired) dispatch();
-    else {
-      history.replaceState({}, "", "/home");
-      mount("/home", renderHome);
-    }
-    startWorkspaceSync();
-  } else {
-    window.location.replace("/login");
-  }
+  window.addEventListener("clipradar:force-login", () => {
+    if (isSessionLocked()) return;
+    lastAuthUid = null;
+    workspaceStarted = false;
+    mountedPath = null;
+    history.replaceState({}, "", "/login");
+    renderLogin();
+  });
 }
 
 boot().catch((e) => {

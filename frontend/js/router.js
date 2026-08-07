@@ -82,18 +82,21 @@ export function dispatch() {
     return;
   }
 
-  // Never show a dead grey 404 — fall back to login/home hook
-  console.warn("No route matched", window.location.pathname, "→ normalized", path);
+  // No match usually means a duplicate ESM instance (empty routes[]) or a
+  // brand-new path. Prefer staying put over a fake login card.
+  console.warn("No route matched", window.location.pathname, "→ normalized", path, "routes=", routes.length);
   if (typeof window.__clipradarFallback === "function") {
     window.__clipradarFallback(path);
     return;
   }
+  if (routes.length === 0) {
+    // Wrong module graph — wait for the real app boot instead of nuking the DOM.
+    return;
+  }
   const app = document.getElementById("app");
-  if (app) {
+  if (app && !app.querySelector(".app-shell")) {
     app.innerHTML =
-      `<div class="auth-page"><div class="auth-card">` +
-      `<h1>ClipRadar</h1><p class="muted">Open <a href="/login">/login</a> (path was ${path})</p>` +
-      `</div></div>`;
+      `<div class="loading-state">Loading ${path}…</div>`;
   }
 }
 

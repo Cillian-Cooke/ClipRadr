@@ -46,14 +46,14 @@ def test_dense_10_second_cluster():
 def test_suggested_bounds_pre_post_roll():
     mentions = [_m(600), _m(604), _m(606)]
     cluster = cluster_timestamps(mentions)[0]
-    start, end = suggested_clip_bounds(cluster, video_duration=3600, pre_roll=10, post_roll=10)
-    assert start == 590
+    start, end = suggested_clip_bounds(cluster, video_duration=3600, pre_roll=5, post_roll=10)
+    assert start == 595
     assert end == 616
 
 
 def test_suggested_bounds_clamp_start():
-    mentions = [_m(5), _m(6)]
+    mentions = [_m(3), _m(4)]
     cluster = cluster_timestamps(mentions)[0]
-    start, end = suggested_clip_bounds(cluster, video_duration=100, pre_roll=10, post_roll=10)
+    start, end = suggested_clip_bounds(cluster, video_duration=100, pre_roll=5, post_roll=10)
     assert start == 0
-    assert end == 16
+    assert end == 14

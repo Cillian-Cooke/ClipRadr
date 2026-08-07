@@ -1,7 +1,7 @@
 import { api } from "../api.js";
 import { navigate } from "../router.js";
 import { el, loading, error } from "../components/Sidebar.js";
-import { store } from "../store.js";
+import { store } from "/js/store.js";
 import { bindLivePage } from "../live.js";
 
 export async function renderHome(root) {

@@ -1,10 +1,12 @@
 import { api, formatTime, downloadAuthed } from "../api.js";
 import { navigate } from "../router.js";
 import { el, loading, error } from "../components/Sidebar.js";
-import { store } from "../store.js";
+import { store } from "/js/store.js";
 
 const MAX_CLIP_SECONDS = 120;
 const DEFAULT_CLIP_SECONDS = 30;
+/** Pull clip start back so the flagged moment isn't the first frame. */
+const CLIP_LEAD_IN_SECONDS = 5;
 const YT_ASPECT = "16:9";
 const YT_WIDTH = 1920;
 const YT_HEIGHT = 1080;
@@ -177,18 +179,27 @@ function rebuildTimelineMarkers(state) {
 }
 
 function applyMomentBounds(state, moment) {
-  const rep = moment.representative_timestamp;
-  let start = moment.start_seconds;
-  let end = moment.end_seconds;
+  const rep = Number(moment.representative_timestamp) || 0;
+  const leadStart = Math.max(0, rep - CLIP_LEAD_IN_SECONDS);
+  let start = Number(moment.start_seconds);
+  let end = Number(moment.end_seconds);
   let dur = end - start;
-  if (dur <= 0 || dur > MAX_CLIP_SECONDS) {
+
+  if (!Number.isFinite(start) || !Number.isFinite(end) || dur <= 0 || dur > MAX_CLIP_SECONDS) {
     dur = Math.min(DEFAULT_CLIP_SECONDS, MAX_CLIP_SECONDS);
-    start = Math.max(0, rep - Math.floor(dur / 2));
+    start = leadStart;
     end = Math.min(state.duration, start + dur);
     start = Math.max(0, end - dur);
+  } else if (start > leadStart) {
+    // Existing moments / tight bounds: still give ~5s of lead-in before the flag.
+    start = leadStart;
+    if (end - start > MAX_CLIP_SECONDS) {
+      end = Math.min(state.duration, start + MAX_CLIP_SECONDS);
+    }
   }
-  state.clipStart = start;
-  state.clipEnd = end;
+
+  state.clipStart = Math.max(0, start);
+  state.clipEnd = Math.min(state.duration, Math.max(end, state.clipStart + 1));
 }
 
 function playbackDuration(state) {
@@ -795,7 +806,7 @@ async function selectMoment(state, momentId, { seek = true, play = false } = {})
     node.classList.toggle("active", node.dataset.momentId === String(momentId));
   });
 
-  if (seek) state.player.seekTo(basic.representative_timestamp, play);
+  if (seek) state.player.seekTo(state.clipStart, play);
   refreshPanels(state);
 
   const fetchId = ++state._momentFetch;

@@ -1,7 +1,7 @@
 import { api, withRetry } from "../api.js";
 import { navigate } from "../router.js";
-import { store } from "../store.js";
-import { afterCreatorAdded } from "../background.js";
+import { store } from "/js/store.js";
+import { afterCreatorAdded } from "/js/background.js";
 import { el } from "./Sidebar.js";
 
 export async function addChannel(ch, statusEl) {

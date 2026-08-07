@@ -1,7 +1,7 @@
 /** Pull fresh workspace data and bump the live revision so open pages repaint. */
 
 import { api } from "./api.js";
-import { store } from "./store.js";
+import { store } from "/js/store.js";
 
 let refreshing = false;
 let pending = null;

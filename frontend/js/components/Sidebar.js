@@ -1,6 +1,5 @@
-import { navigate } from "../router.js";
-import { store } from "../store.js";
-import { looksLikeChannelQuery, openAddCreatorModal } from "./AddCreator.js";
+import { store } from "/js/store.js";
+import { openAddCreatorModal } from "./AddCreator.js";
 import { api } from "../api.js";
 
 const NAV = [
@@ -87,57 +86,38 @@ export function renderShell(
 
   const main = el("main", { class: "main" });
   const topbar = el("div", { class: "topbar" });
-  const searchWrap = el("div", { class: "search-wrap" });
-  const search = el("input", {
-    type: "search",
-    placeholder: "Search library, or paste a YouTube channel / @handle…",
+
+  const accountWrap = el("div", {
+    class: "topbar-account",
+    style: "display:flex;align-items:center;gap:8px;margin-left:auto;",
   });
-  search.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter" || !search.value.trim()) return;
-    const q = search.value.trim();
-    if (looksLikeChannelQuery(q)) {
-      openAddCreatorModal({
-        initialQuery: q,
-        onDone: () => store.bumpData("creator-added"),
-      });
-      return;
-    }
-    navigate(`/search?q=${encodeURIComponent(q)}`);
-  });
-  searchWrap.append(search);
-  topbar.append(searchWrap);
-  topbar.append(
+  accountWrap.append(
     el("button", {
       class: "btn btn-primary btn-sm",
       text: "+ Add Creator",
       onclick: () =>
         openAddCreatorModal({
-          initialQuery: search.value.trim(),
           onDone: () => store.bumpData("creator-added"),
         }),
     })
   );
-
-  // Account chip (plan / sign out) — filled async
-  const accountWrap = el("div", { class: "topbar-account", style: "display:flex;align-items:center;gap:8px;" });
   topbar.append(accountWrap);
-  import("../auth.js").then(async ({ getUser, signOut, onAuthChange, isSignedIn }) => {
+
+  import("/js/auth.js").then(async ({ getUser, signOut, onAuthChange, isSignedIn }) => {
     const paint = async () => {
-      accountWrap.replaceChildren();
-      if (!isSignedIn() && !getUser()) {
-        // Avoid hammering /api/account/me with 401s before login
-        return;
-      }
+      accountWrap.replaceChildren(
+        el("button", {
+          class: "btn btn-primary btn-sm",
+          text: "+ Add Creator",
+          onclick: () =>
+            openAddCreatorModal({
+              onDone: () => store.bumpData("creator-added"),
+            }),
+        })
+      );
+      if (!isSignedIn() && !getUser()) return;
       try {
         const me = await api.me();
-        const plan = me.plan || "free";
-        accountWrap.append(
-          el("span", {
-            class: "badge",
-            text: me.bypass ? "Local" : plan.toUpperCase(),
-            title: me.email || "",
-          })
-        );
         if (!me.bypass) {
           accountWrap.append(
             el("button", {
@@ -145,16 +125,13 @@ export function renderShell(
               text: "Sign out",
               onclick: async () => {
                 await signOut();
-                navigate("/login");
+                window.location.replace("/login");
               },
             })
           );
         }
       } catch {
-        const u = getUser();
-        if (u) {
-          accountWrap.append(el("span", { class: "badge", text: u.email || "Signed in" }));
-        }
+        /* signed-in UI optional */
       }
     };
     paint();

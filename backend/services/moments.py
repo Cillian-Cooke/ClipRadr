@@ -112,11 +112,15 @@ def suggested_clip_bounds(
     cluster: MomentCluster,
     *,
     video_duration: int,
-    pre_roll: int = 10,
+    pre_roll: int = 5,
     post_roll: int = 10,
 ) -> tuple[int, int]:
-    start = max(0, cluster.start_seconds - pre_roll)
-    end = min(video_duration, cluster.end_seconds + post_roll)
+    """Pad the cluster so exports start before the flagged moment when possible."""
+    # Lead in from the earliest mention / representative so the action isn't cut off.
+    anchor_start = min(cluster.start_seconds, cluster.representative_timestamp)
+    anchor_end = max(cluster.end_seconds, cluster.representative_timestamp)
+    start = max(0, anchor_start - pre_roll)
+    end = min(video_duration, anchor_end + post_roll)
     if end <= start:
         end = min(video_duration, start + 1)
     return start, end

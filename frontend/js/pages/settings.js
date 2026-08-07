@@ -51,7 +51,7 @@ export async function renderSettings(root) {
       ? "1. Create a free Neon project → copy the pooled connection string\n2. Vercel → Settings → Environment Variables\n   DATABASE_URL = postgresql://…?sslmode=require\n   YOUTUBE_API_KEY = your key\n   DEMO_MODE = false\n3. Deployments → Redeploy"
       : onVercel
         ? "Vercel → your project → Settings → Environment Variables"
-        : `# ${status.setup.env_file}\nYOUTUBE_API_KEY=your_key_here\nFIREBASE_PROJECT_ID=...\nFIREBASE_CREDENTIALS_PATH=./secrets/firebase-service-account.json\nFIREBASE_WEB_API_KEY=...\n\n# Restart:\nuvicorn backend.main:app --reload --host 127.0.0.1 --port 8001`;
+        : `# ${status.setup.env_file}\nYOUTUBE_API_KEY=your_key_here\nFIREBASE_PROJECT_ID=...\nFIREBASE_CREDENTIALS_PATH=./secrets/firebase-service-account.json\nFIREBASE_WEB_API_KEY=...\n\n# Restart:\nuvicorn backend.main:app --reload --host localhost --port 8001`;
 
     const finished = exportsRes.exports || [];
 

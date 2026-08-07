@@ -2,7 +2,7 @@ import { api, withRetry } from "../api.js";
 import { navigate } from "../router.js";
 import { el, loading, error, empty } from "../components/Sidebar.js";
 import { addChannel } from "../components/AddCreator.js";
-import { store } from "../store.js";
+import { store } from "/js/store.js";
 
 export async function renderSearch(root) {
   const q = new URLSearchParams(window.location.search).get("q") || "";
@@ -15,7 +15,7 @@ export async function renderSearch(root) {
             el("h1", { text: "Search" }),
             el("p", { text: "Find creators, videos, moments, or look up a YouTube channel to add." }),
           ]),
-          empty("Type a query in the top search bar."),
+          empty("Type a query below or open Add Creator from the top bar."),
         ])
       );
       return;

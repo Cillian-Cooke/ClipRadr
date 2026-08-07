@@ -1,7 +1,7 @@
 /** Global background scanner — keeps running across page navigations. */
 
 import { api, withRetry } from "./api.js";
-import { store } from "./store.js";
+import { store } from "/js/store.js";
 import { refreshWorkspace } from "./refresh.js";
 
 let started = false;

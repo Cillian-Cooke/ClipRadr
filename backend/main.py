@@ -41,6 +41,33 @@ def create_app() -> FastAPI:
     app.include_router(youtube_search.router)
     app.include_router(account.router)
 
+    @app.middleware("http")
+    async def prefer_localhost_host(request, call_next):
+        """One origin only — 127.0.0.1 and localhost do not share Firebase/localStorage."""
+        host = (request.headers.get("host") or "").split(":")[0].strip().lower()
+        if host == "127.0.0.1":
+            from fastapi.responses import RedirectResponse
+
+            host_header = request.headers.get("host") or "localhost"
+            port_part = ""
+            if ":" in host_header:
+                port_part = ":" + host_header.split(":", 1)[1]
+            target = f"http://localhost{port_part}{request.url.path}"
+            if request.url.query:
+                target += f"?{request.url.query}"
+            return RedirectResponse(url=target, status_code=307)
+        return await call_next(request)
+
+    @app.middleware("http")
+    async def no_cache_frontend_assets(request, call_next):
+        """Avoid stale ES modules (entry cache-bust alone does not refresh imports)."""
+        response = await call_next(request)
+        path = request.url.path
+        if path.startswith(("/js/", "/css/")) or path in ("/", "/login", "/index.html", "/login.html"):
+            response.headers["Cache-Control"] = "no-store, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+        return response
+
     if STATIC.exists():
         app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
     app.mount("/css", StaticFiles(directory=str(FRONTEND / "css")), name="css")
@@ -134,16 +161,15 @@ def create_app() -> FastAPI:
 
     @app.get("/")
     def index():
-        # Auth-gated apps: send browsers straight to the standalone login page
-        from backend.services.firebase_app import auth_required
-
-        if auth_required():
-            return FileResponse(FRONTEND / "login.html", media_type="text/html")
+        # Always serve the SPA — it shows a loading state while Firebase
+        # restores the session, so we never flash the login form on tab focus.
         return FileResponse(FRONTEND / "index.html", media_type="text/html")
 
     @app.get("/login")
     def login_page():
-        return FileResponse(FRONTEND / "login.html", media_type="text/html")
+        # Same SPA shell; client route renders the sign-in UI only after
+        # auth has confirmed there is no session.
+        return FileResponse(FRONTEND / "index.html", media_type="text/html")
 
     # SPA-style fallback for client routes
     @app.get("/{full_path:path}")
@@ -151,8 +177,6 @@ def create_app() -> FastAPI:
         # Don't swallow API or static mounts
         if full_path.startswith(("api/", "static/", "css/", "js/", "vendor/")):
             return {"detail": "Not Found"}
-        if full_path in ("login", "login.html"):
-            return FileResponse(FRONTEND / "login.html", media_type="text/html")
         file_path = FRONTEND / full_path
         if full_path and file_path.exists() and file_path.is_file():
             return FileResponse(file_path)

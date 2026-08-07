@@ -19,6 +19,7 @@ from backend.services.embeddings import (
 from backend.services.moments import TimestampMention, cluster_timestamps, suggested_clip_bounds
 from backend.services.scoring import score_cluster
 from backend.services.timestamps import extract_timestamps
+from backend.services.video_filters import is_youtube_short
 from backend.services.youtube import YouTubeAPIError, get_video_comments
 
 logger = logging.getLogger(__name__)
@@ -272,13 +273,19 @@ def scan_creator(db: Session, creator_id: int, *, max_videos: int | None = None)
         raise ValueError("Creator not found")
 
     limit = max_videos or settings.recent_videos_limit
-    videos = (
+    # Pull a wider window, then keep long-form only so Shorts don't burn scan quota.
+    candidates = (
         db.query(models.Video)
         .filter_by(creator_id=creator_id)
         .order_by(models.Video.published_at.desc())
-        .limit(limit)
+        .limit(max(limit * 3, limit))
         .all()
     )
+    videos = [
+        v
+        for v in candidates
+        if not is_youtube_short(v.duration_seconds, v.title)
+    ][:limit]
 
     results = []
     errors = []
@@ -313,26 +320,34 @@ def import_creator_videos(db: Session, creator: models.Creator) -> int:
     if not creator.uploads_playlist_id:
         return 0
 
+    want = settings.recent_videos_limit
+    # Fetch a wider playlist window so Shorts don't crowd out long-form VODs.
     recent = get_recent_videos(
         creator.uploads_playlist_id,
-        max_results=settings.recent_videos_limit,
+        max_results=min(50, max(want * 3, want)),
     )
     ids = [v["youtube_video_id"] for v in recent]
     details = {d["youtube_video_id"]: d for d in get_video_details(ids)}
     added = 0
     for item in recent:
+        if added >= want:
+            break
         vid = item["youtube_video_id"]
         if db.query(models.Video).filter_by(youtube_video_id=vid).first():
             continue
         detail = details.get(vid, item)
+        title = detail.get("title") or item.get("title") or "Untitled"
+        duration = detail.get("duration_seconds") or 0
+        if is_youtube_short(duration, title):
+            continue
         db.add(
             models.Video(
                 creator_id=creator.id,
                 youtube_video_id=vid,
-                title=detail.get("title") or item.get("title") or "Untitled",
+                title=title,
                 description=detail.get("description") or "",
                 thumbnail_url=detail.get("thumbnail_url") or item.get("thumbnail_url"),
-                duration_seconds=detail.get("duration_seconds") or 0,
+                duration_seconds=duration,
                 published_at=parse_yt_datetime(detail.get("published_at") or item.get("published_at")),
                 view_count=detail.get("view_count") or 0,
                 comment_count=detail.get("comment_count") or 0,

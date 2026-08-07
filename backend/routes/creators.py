@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 
@@ -188,7 +188,13 @@ def remove_creator(
 
 
 @router.get("/{creator_id}/videos")
-def creator_videos(creator_id: int, db: Session = Depends(get_db)):
+def creator_videos(
+    creator_id: int,
+    exclude_shorts: bool = Query(True),
+    db: Session = Depends(get_db),
+):
+    from backend.services.video_filters import is_youtube_short
+
     creator = db.get(models.Creator, creator_id)
     if not creator:
         raise HTTPException(404, "Creator not found")
@@ -200,11 +206,15 @@ def creator_videos(creator_id: int, db: Session = Depends(get_db)):
         .all()
     )
     items = []
+    shorts_hidden = 0
     for video in videos:
+        if exclude_shorts and is_youtube_short(video.duration_seconds, video.title):
+            shorts_hidden += 1
+            continue
         moments = db.query(models.Moment).filter_by(video_id=video.id).all()
         high = sum(1 for m in moments if m.score >= 80)
         items.append(video_to_dict(video, moment_count=len(moments), high_confidence=high))
-    return {"videos": items}
+    return {"videos": items, "shorts_hidden": shorts_hidden, "exclude_shorts": exclude_shorts}
 
 
 @router.post("/{creator_id}/scan")
@@ -217,13 +227,19 @@ def scan_creator_route(creator_id: int, db: Session = Depends(get_db)):
     if not api_configured():
         raise HTTPException(400, "YOUTUBE_API_KEY is not set.")
 
-    # Mark unscanned videos as scanning for UI feedback
-    (
+    # Mark unscanned long-form videos as scanning for UI feedback
+    videos = (
         db.query(models.Video)
         .filter_by(creator_id=creator_id, is_demo=0)
         .filter(models.Video.scan_status.in_(["NOT_SCANNED", "FAILED"]))
-        .update({"scan_status": "SCANNING"}, synchronize_session=False)
+        .all()
     )
+    from backend.services.video_filters import is_youtube_short
+
+    for video in videos:
+        if is_youtube_short(video.duration_seconds, video.title):
+            continue
+        video.scan_status = "SCANNING"
     db.commit()
     _run_scan_creator_async(creator_id)
     return {

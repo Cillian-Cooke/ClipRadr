@@ -1,6 +1,6 @@
 /** Soft page refresh when workspace data changes (scans, adds, restore). */
 
-import { store } from "./store.js";
+import { store } from "/js/store.js";
 
 let activeCleanup = null;
 

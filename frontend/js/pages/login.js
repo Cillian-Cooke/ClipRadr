@@ -1,6 +1,6 @@
-import { el } from "../components/Sidebar.js";
-import { signInEmail, signUpEmail, signInGoogle } from "../auth.js";
-import { navigate } from "../router.js";
+import { el } from "/js/components/Sidebar.js";
+import { signInEmail, signUpEmail, signInGoogle } from "/js/auth.js";
+import { navigate } from "/js/router.js";
 
 export function renderLogin() {
   const app = document.getElementById("app");

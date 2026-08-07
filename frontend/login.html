@@ -160,7 +160,16 @@
             setStatus("Ready — sign in or create an account.");
 
             auth.onAuthStateChanged(function (user) {
-              if (user) window.location.replace("/home");
+              // Avoid bounce loops after an intentional logout, and don't
+              // hard-redirect on every tab-focus auth callback.
+              if (sessionStorage.getItem("clipradar_logging_out") === "1") {
+                if (!user) sessionStorage.removeItem("clipradar_logging_out");
+                return;
+              }
+              if (user && !window.__crLoginRedirected) {
+                window.__crLoginRedirected = true;
+                window.location.replace("/home");
+              }
             });
 
             document.getElementById("btn-in").onclick = async function () {
