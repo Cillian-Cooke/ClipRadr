@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     dev_auth_bypass: bool = True
     free_exports_per_day: int = 3
 
+    # yt-dlp YouTube auth (needed on cloud IPs that trip bot checks)
+    # Prefer path locally; paste Netscape cookies.txt contents into YTDLP_COOKIES on Railway.
+    ytdlp_cookies_path: str = ""
+    ytdlp_cookies: str = ""
+
 
 settings = Settings()
 

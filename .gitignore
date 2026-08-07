@@ -20,3 +20,5 @@ media/demo/*.mp4
 secrets/
 frontend/js/firebase-config.js
 **/firebase-service-account*.json
+**/youtube-cookies*.txt
+**/cookies.txt

@@ -2,17 +2,67 @@
 
 from __future__ import annotations
 
+import atexit
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
+from backend.config import settings
 from backend.services.ffmpeg import FFmpegError, export_clip, ffmpeg_binary, remux_faststart
+
+_cookies_tmp: Path | None = None
 
 
 class YtDlpError(RuntimeError):
     pass
+
+
+def _cookies_file() -> Path | None:
+    """Resolve Netscape cookies for yt-dlp (path or YTDLP_COOKIES env contents)."""
+    global _cookies_tmp
+    path = (settings.ytdlp_cookies_path or "").strip()
+    if path:
+        p = Path(path).expanduser()
+        if p.is_file():
+            return p
+    raw = (settings.ytdlp_cookies or "").strip()
+    if not raw:
+        return None
+    if _cookies_tmp and _cookies_tmp.is_file():
+        return _cookies_tmp
+    fd, name = tempfile.mkstemp(prefix="clipradr_yt_cookies_", suffix=".txt")
+    try:
+        os.write(fd, (raw if raw.endswith("\n") else raw + "\n").encode("utf-8"))
+    finally:
+        os.close(fd)
+    _cookies_tmp = Path(name)
+
+    def _cleanup() -> None:
+        if _cookies_tmp:
+            _cookies_tmp.unlink(missing_ok=True)
+
+    atexit.register(_cleanup)
+    return _cookies_tmp
+
+
+def _cookie_args() -> list[str]:
+    cookies = _cookies_file()
+    return ["--cookies", str(cookies)] if cookies else []
+
+
+def _friendly_ytdlp_error(stderr: str) -> str:
+    text = (stderr or "").strip()
+    if "Sign in to confirm you’re not a bot" in text or "not a bot" in text.lower():
+        return (
+            "YouTube blocked this download (bot check). On Railway/datacenter IPs you need "
+            "browser cookies: export a cookies.txt from a logged-in YouTube session, then set "
+            "YTDLP_COOKIES (paste file contents) or YTDLP_COOKIES_PATH and redeploy. "
+            "See https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies"
+        )
+    return text[-2000:] if text else "yt-dlp failed"
 
 
 def ytdlp_binary() -> str | None:
@@ -167,6 +217,7 @@ def _download_with_sections(
         cmd = [
             *_ytdlp_cmd_prefix(),
             "--no-playlist",
+            *_cookie_args(),
             "--force-keyframes-at-cuts",
             "--download-sections",
             section,
@@ -192,6 +243,7 @@ def _download_with_sections(
             cmd_retry = [
                 *_ytdlp_cmd_prefix(),
                 "--no-playlist",
+                *_cookie_args(),
                 "--force-keyframes-at-cuts",
                 "--download-sections",
                 section,
@@ -211,7 +263,7 @@ def _download_with_sections(
             result = subprocess.run(cmd_retry, capture_output=True, text=True)
             if result.returncode != 0:
                 err2 = (result.stderr or result.stdout or err).strip()
-                raise YtDlpError(err2[-2000:])
+                raise YtDlpError(_friendly_ytdlp_error(err2))
 
         produced = sorted(Path(tmp).glob("section.*"))
         if not produced:
@@ -252,6 +304,7 @@ def _cut_from_direct_url(
         [
             *_ytdlp_cmd_prefix(),
             "--no-playlist",
+            *_cookie_args(),
             "-f",
             _format_selector(max_height),
             "--extractor-args",
@@ -263,7 +316,9 @@ def _cut_from_direct_url(
         text=True,
     )
     if probe.returncode != 0:
-        raise YtDlpError((probe.stderr or probe.stdout or "Could not resolve stream URL")[-1500:])
+        raise YtDlpError(
+            _friendly_ytdlp_error(probe.stderr or probe.stdout or "Could not resolve stream URL")
+        )
 
     lines = [ln.strip() for ln in (probe.stdout or "").splitlines() if ln.strip()]
     if not lines:
@@ -344,6 +399,7 @@ def _download_full_then_cut(
         cmd = [
             *_ytdlp_cmd_prefix(),
             "--no-playlist",
+            *_cookie_args(),
             "-f",
             _format_selector(max_height),
             "--merge-output-format",
@@ -360,7 +416,9 @@ def _download_full_then_cut(
             cmd.extend(["--ffmpeg-location", ff_dir])
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            raise YtDlpError((result.stderr or result.stdout or "Full download failed")[-2000:])
+            raise YtDlpError(
+                _friendly_ytdlp_error(result.stderr or result.stdout or "Full download failed")
+            )
         produced = sorted(Path(tmp).glob("full.*"))
         if not produced:
             raise YtDlpError("Full download produced no file.")
