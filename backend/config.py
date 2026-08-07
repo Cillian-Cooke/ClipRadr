@@ -54,9 +54,11 @@ class Settings(BaseSettings):
     free_exports_per_day: int = 3
 
     # yt-dlp YouTube auth (needed on cloud IPs that trip bot checks)
-    # Prefer path locally; paste Netscape cookies.txt contents into YTDLP_COOKIES on Railway.
+    # Prefer path locally. On Railway use YTDLP_COOKIES_B64 (base64 of cookies.txt) —
+    # raw multiline paste often corrupts tabs/newlines in Variables.
     ytdlp_cookies_path: str = ""
     ytdlp_cookies: str = ""
+    ytdlp_cookies_b64: str = ""
 
 
 settings = Settings()

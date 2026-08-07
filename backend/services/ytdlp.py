@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import atexit
+import base64
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -20,22 +22,82 @@ class YtDlpError(RuntimeError):
     pass
 
 
+def _normalize_netscape_cookies(raw: str) -> str:
+    """
+    Build a Netscape cookies file yt-dlp will accept.
+
+    Railway Variable pastes often turn tabs into spaces or smash lines — recover
+    what we can, and always include the required header.
+    """
+    text = (raw or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        return ""
+
+    # Some UIs escape newlines as literal \n
+    if "\\n" in text and text.count("\n") < 3:
+        text = text.replace("\\n", "\n").replace("\\t", "\t")
+
+    lines_out: list[str] = ["# Netscape HTTP Cookie File"]
+    for line in text.split("\n"):
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        # Prefer real tabs; if spaces were substituted, collapse runs into tabs
+        # for typical 7-field Netscape rows.
+        if "\t" in s:
+            parts = s.split("\t")
+        else:
+            parts = re.split(r"[ ]{2,}|\t+", s)
+            if len(parts) < 7:
+                parts = s.split()
+        if len(parts) < 7:
+            continue
+        # domain, flag, path, secure, expiry, name, value(+rest)
+        domain, flag, path, secure, expiry, name = parts[:6]
+        value = "\t".join(parts[6:]) if len(parts) > 7 else parts[6]
+        if not domain or not name:
+            continue
+        lines_out.append("\t".join([domain, flag, path, secure, expiry, name, value]))
+
+    if len(lines_out) <= 1:
+        raise YtDlpError(
+            "YouTube cookies are invalid/corrupted (not Netscape format). "
+            "On Railway, do not paste the raw file — run: "
+            "base64 -w0 secrets/youtube-cookies.txt "
+            "and set YTDLP_COOKIES_B64 to that single line, then remove YTDLP_COOKIES."
+        )
+    return "\n".join(lines_out) + "\n"
+
+
+def _cookies_raw_from_settings() -> str:
+    b64 = (settings.ytdlp_cookies_b64 or "").strip()
+    if b64:
+        try:
+            return base64.b64decode(b64, validate=False).decode("utf-8", errors="replace")
+        except Exception as exc:
+            raise YtDlpError(f"YTDLP_COOKIES_B64 is not valid base64: {exc}") from exc
+    return (settings.ytdlp_cookies or "").strip()
+
+
 def _cookies_file() -> Path | None:
-    """Resolve Netscape cookies for yt-dlp (path or YTDLP_COOKIES env contents)."""
+    """Resolve Netscape cookies for yt-dlp (path, B64, or raw env contents)."""
     global _cookies_tmp
     path = (settings.ytdlp_cookies_path or "").strip()
     if path:
         p = Path(path).expanduser()
         if p.is_file():
             return p
-    raw = (settings.ytdlp_cookies or "").strip()
+
+    raw = _cookies_raw_from_settings()
     if not raw:
         return None
     if _cookies_tmp and _cookies_tmp.is_file():
         return _cookies_tmp
+
+    normalized = _normalize_netscape_cookies(raw)
     fd, name = tempfile.mkstemp(prefix="clipradr_yt_cookies_", suffix=".txt")
     try:
-        os.write(fd, (raw if raw.endswith("\n") else raw + "\n").encode("utf-8"))
+        os.write(fd, normalized.encode("utf-8"))
     finally:
         os.close(fd)
     _cookies_tmp = Path(name)
@@ -55,11 +117,17 @@ def _cookie_args() -> list[str]:
 
 def _friendly_ytdlp_error(stderr: str) -> str:
     text = (stderr or "").strip()
-    if "Sign in to confirm you’re not a bot" in text or "not a bot" in text.lower():
+    low = text.lower()
+    if "does not look like a netscape format cookies file" in low or "invalid length" in low:
         return (
-            "YouTube blocked this download (bot check). On Railway/datacenter IPs you need "
-            "browser cookies: export a cookies.txt from a logged-in YouTube session, then set "
-            "YTDLP_COOKIES (paste file contents) or YTDLP_COOKIES_PATH and redeploy. "
+            "YouTube cookies were corrupted in Railway Variables (tabs/newlines got mangled). "
+            "Delete YTDLP_COOKIES, then set YTDLP_COOKIES_B64 to the output of: "
+            "base64 -w0 secrets/youtube-cookies.txt"
+        )
+    if "Sign in to confirm you’re not a bot" in text or "not a bot" in low:
+        return (
+            "YouTube blocked this download (bot check). On Railway set YTDLP_COOKIES_B64 "
+            "(base64 of a Netscape cookies.txt from a logged-in browser). "
             "See https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies"
         )
     return text[-2000:] if text else "yt-dlp failed"
