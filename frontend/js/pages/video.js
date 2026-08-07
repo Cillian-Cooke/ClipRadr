@@ -878,7 +878,7 @@ function openExportModal(state) {
 
   let quality = DEFAULT_EXPORT_QUALITY;
   try {
-    const saved = Number(localStorage.getItem("clipradar_export_quality"));
+    const saved = Number(localStorage.getItem("clipradr_export_quality"));
     if (EXPORT_QUALITIES.some((q) => q.height === saved)) quality = saved;
   } catch {
     /* ignore */
@@ -906,7 +906,7 @@ function openExportModal(state) {
           onclick: () => {
             quality = opt.height;
             try {
-              localStorage.setItem("clipradar_export_quality", String(quality));
+              localStorage.setItem("clipradr_export_quality", String(quality));
             } catch {
               /* ignore */
             }
@@ -929,7 +929,7 @@ function openExportModal(state) {
     downloadBtn.disabled = true;
     downloadBtn.textContent = "Downloading…";
     try {
-      await downloadAuthed(downloadUrl, `clipradar_${state.video.id}_${Math.round(state.clipStart)}.mp4`);
+      await downloadAuthed(downloadUrl, `clipradr_${state.video.id}_${Math.round(state.clipStart)}.mp4`);
       downloadBtn.textContent = "Download Clip";
       downloadBtn.disabled = false;
     } catch (err) {

@@ -1,4 +1,4 @@
-"""Deterministic demo dataset for ClipRadar hackathon presentation."""
+"""Deterministic demo dataset for ClipRadr hackathon presentation."""
 
 from __future__ import annotations
 
@@ -250,10 +250,10 @@ DEMO_VIDEOS = [
 
 
 def ensure_workspace_user(db: Session) -> models.User:
-    user = db.query(models.User).filter_by(email="editor@clipradar.demo").first()
+    user = db.query(models.User).filter_by(email="editor@clipradr.demo").first()
     if user:
         return user
-    user = models.User(email="editor@clipradar.demo", name="Editor")
+    user = models.User(email="editor@clipradr.demo", name="Editor")
     db.add(user)
     db.commit()
     db.refresh(user)

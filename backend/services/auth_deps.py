@@ -57,7 +57,7 @@ def _upsert_sql_user(db: Session, *, uid: str, email: str, name: str) -> models.
         return by_email
 
     user = models.User(
-        email=email or f"{uid}@users.clipradar.local",
+        email=email or f"{uid}@users.clipradr.local",
         name=name or "Editor",
         firebase_uid=uid,
     )

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ClipRadar — Sign in</title>
+    <title>ClipRadr — Sign in</title>
     <style>
       * { box-sizing: border-box; }
       html, body {
@@ -82,7 +82,7 @@
         <div class="brand">
           <div class="mark">CR</div>
           <div>
-            <strong>ClipRadar</strong>
+            <strong>ClipRadr</strong>
             <span>Sign in</span>
           </div>
         </div>
@@ -162,8 +162,8 @@
             auth.onAuthStateChanged(function (user) {
               // Avoid bounce loops after an intentional logout, and don't
               // hard-redirect on every tab-focus auth callback.
-              if (sessionStorage.getItem("clipradar_logging_out") === "1") {
-                if (!user) sessionStorage.removeItem("clipradar_logging_out");
+              if (sessionStorage.getItem("clipradr_logging_out") === "1") {
+                if (!user) sessionStorage.removeItem("clipradr_logging_out");
                 return;
               }
               if (user && !window.__crLoginRedirected) {

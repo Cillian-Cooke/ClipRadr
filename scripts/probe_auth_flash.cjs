@@ -1,12 +1,12 @@
 /**
- * Reproduce ClipRadar auth flash on tab focus / discard reload.
+ * Reproduce ClipRadr auth flash on tab focus / discard reload.
  * Mocks Firebase so we can control onAuthStateChanged timing.
  *
  * Run: node scripts/probe_auth_flash.mjs
  */
 const { chromium } = require("playwright");
 
-const BASE = process.env.CLIPRADAR_URL || "http://localhost:8001";
+const BASE = process.env.CLIPRADR_URL || "http://localhost:8001";
 
 async function snapshot(page, label) {
   const info = await page.evaluate(() => {
@@ -15,7 +15,7 @@ async function snapshot(page, label) {
     const hasLogin =
       !!document.querySelector('input[type="password"]') ||
       /welcome back|sign in|create account/i.test(text);
-    const hasLoading = /restoring session|starting clipradar/i.test(text);
+    const hasLoading = /restoring session|starting clipradr/i.test(text);
     const path = location.pathname;
     return {
       path,
@@ -56,7 +56,7 @@ async function main() {
         "firebase:authUser:probe-key:[DEFAULT]",
         JSON.stringify({ uid: "probe-uid", email: "probe@test.com", stsTokenManager: { accessToken: "x" } })
       );
-      localStorage.setItem("clipradar_session_uid", "probe-uid");
+      localStorage.setItem("clipradr_session_uid", "probe-uid");
     } catch {}
 
     let authHandler = null;
@@ -164,7 +164,7 @@ async function main() {
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        app: "ClipRadar",
+        app: "ClipRadr",
         auth: {
           auth_required: true,
           firebase_ready: true,

@@ -1,13 +1,13 @@
-# ClipRadar
+# ClipRadr
 
 > Turn the audience's timestamps and reactions into an editor-ready clip queue — so editors can go from a four-hour VOD to the exact moments worth cutting in seconds.
 
-ClipRadar is an editor workstation for YouTube creators' long-form VODs. It organizes recent videos, clusters audience timestamp comments into clip moments, and exports real MP4 clips via FFmpeg from authorized/demo source media.
+ClipRadr is an editor workstation for YouTube creators' long-form VODs. It organizes recent videos, clusters audience timestamp comments into clip moments, and exports real MP4 clips via FFmpeg from authorized/demo source media.
 
 ## Quick start
 
 ```bash
-cd ~/Projects/ClipRadar
+cd ~/Projects/ClipRadr
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt

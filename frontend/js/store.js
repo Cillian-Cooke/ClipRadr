@@ -1,7 +1,7 @@
 /** Persistent client cache + scan queue (survives navigation; keyed per account). */
 
-const BASE_KEY = "clipradar:cache:v1";
-const ACCOUNT_KEY = "clipradar:cache:account";
+const BASE_KEY = "clipradr:cache:v1";
+const ACCOUNT_KEY = "clipradr:cache:account";
 
 const EMPTY_PERSIST = {
   followedChannels: [],

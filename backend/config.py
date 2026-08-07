@@ -10,8 +10,8 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 
 # Vercel serverless: filesystem is read-only except /tmp
 IS_VERCEL = os.getenv("VERCEL") == "1"
-_RUNTIME_DIR = Path("/tmp/clipradar") if IS_VERCEL else ROOT_DIR
-_DEFAULT_DB = f"sqlite:///{_RUNTIME_DIR / 'data' / 'clipradar.db'}"
+_RUNTIME_DIR = Path("/tmp/clipradr") if IS_VERCEL else ROOT_DIR
+_DEFAULT_DB = f"sqlite:///{_RUNTIME_DIR / 'data' / 'clipradr.db'}"
 _DEFAULT_STORAGE = str(_RUNTIME_DIR / "media")
 
 

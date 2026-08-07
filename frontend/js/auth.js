@@ -12,7 +12,7 @@ let explicitSignOut = false;
 let bootWaitTimer = null;
 const listeners = new Set();
 
-const SESSION_KEY = "clipradar_session_uid";
+const SESSION_KEY = "clipradr_session_uid";
 
 function uidOf(user) {
   return user?.uid || null;
@@ -269,7 +269,7 @@ export async function forceLogout(reason = "Session expired") {
     notify();
     console.warn("[auth]", reason);
     history.replaceState({}, "", "/login");
-    window.dispatchEvent(new CustomEvent("clipradar:force-login", { detail: reason }));
+    window.dispatchEvent(new CustomEvent("clipradr:force-login", { detail: reason }));
   } finally {
     setTimeout(() => {
       loggingOut = false;

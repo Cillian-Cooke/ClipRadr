@@ -53,7 +53,7 @@ def _ffmpeg_location_dir() -> str | None:
     path = Path(ff)
     if path.name == "ffmpeg":
         return str(path.parent)
-    link_dir = Path(tempfile.gettempdir()) / "clipradar_ffmpeg_bin"
+    link_dir = Path(tempfile.gettempdir()) / "clipradr_ffmpeg_bin"
     link_dir.mkdir(parents=True, exist_ok=True)
     link = link_dir / "ffmpeg"
     try:
@@ -162,7 +162,7 @@ def _download_with_sections(
     fmt: str,
 ) -> Path:
     section = f"*{start:.3f}-{end:.3f}"
-    with tempfile.TemporaryDirectory(prefix="clipradar_yt_") as tmp:
+    with tempfile.TemporaryDirectory(prefix="clipradr_yt_") as tmp:
         tmp_base = Path(tmp) / "section"
         cmd = [
             *_ytdlp_cmd_prefix(),
@@ -339,7 +339,7 @@ def _download_full_then_cut(
     max_height: int = 720,
 ) -> Path:
     """Download selected quality (no remote ffmpeg), then cut locally."""
-    with tempfile.TemporaryDirectory(prefix="clipradar_yt_full_") as tmp:
+    with tempfile.TemporaryDirectory(prefix="clipradr_yt_full_") as tmp:
         tmp_base = Path(tmp) / "full"
         cmd = [
             *_ytdlp_cmd_prefix(),
@@ -443,7 +443,7 @@ def export_youtube_clip(
     max_height = int(height or 720)
     if on_progress:
         on_progress(30)
-    with tempfile.TemporaryDirectory(prefix="clipradar_yt_raw_") as tmp:
+    with tempfile.TemporaryDirectory(prefix="clipradr_yt_raw_") as tmp:
         raw = Path(tmp) / "raw.mp4"
         download_clip_section(
             youtube_video_id=youtube_video_id,

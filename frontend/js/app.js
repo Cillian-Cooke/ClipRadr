@@ -164,7 +164,7 @@ async function boot() {
 
   if (authRequired) {
     showBootLoading(
-      hasCachedFirebaseSession() ? "Restoring session…" : "Starting ClipRadar…"
+      hasCachedFirebaseSession() ? "Restoring session…" : "Starting ClipRadr…"
     );
   } else {
     dispatch();
@@ -224,7 +224,7 @@ async function boot() {
     });
   });
 
-  window.addEventListener("clipradar:force-login", () => {
+  window.addEventListener("clipradr:force-login", () => {
     if (isSessionLocked()) return;
     lastAuthUid = null;
     workspaceStarted = false;
@@ -242,4 +242,4 @@ boot().catch((e) => {
   }
 });
 
-window.ClipRadar = { api, navigate, formatTime, store };
+window.ClipRadr = { api, navigate, formatTime, store };

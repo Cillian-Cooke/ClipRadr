@@ -47,7 +47,7 @@ export function renderLogin() {
     el("div", { class: "brand", style: "margin-bottom:18px;" }, [
       el("div", { class: "brand-mark", text: "CR" }),
       el("div", {}, [
-        el("div", { class: "brand-name", text: "ClipRadar" }),
+        el("div", { class: "brand-name", text: "ClipRadr" }),
         el("div", { class: "brand-sub", text: "Sign in" }),
       ]),
     ]),

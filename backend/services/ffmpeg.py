@@ -30,7 +30,7 @@ def ffmpeg_binary() -> str | None:
     """
     import os
 
-    for candidate in (os.environ.get("CLIPRADAR_FFMPEG"), os.environ.get("FFMPEG_BINARY")):
+    for candidate in (os.environ.get("CLIPRADR_FFMPEG"), os.environ.get("FFMPEG_BINARY")):
         if candidate and Path(candidate).is_file():
             return candidate
 

@@ -11,8 +11,8 @@ export const LENGTH_FILTERS = [
   { id: "over_1h", label: "Over 1 hour" },
 ];
 
-const PREF_KEY = "clipradar_length_filter";
-const LEGACY_SHORTS_KEY = "clipradar_exclude_shorts";
+const PREF_KEY = "clipradr_length_filter";
+const LEGACY_SHORTS_KEY = "clipradr_exclude_shorts";
 
 export function isShortVideo(video) {
   const duration = Number(video?.duration_seconds) || 0;

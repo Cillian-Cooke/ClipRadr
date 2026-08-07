@@ -85,8 +85,8 @@ export function dispatch() {
   // No match usually means a duplicate ESM instance (empty routes[]) or a
   // brand-new path. Prefer staying put over a fake login card.
   console.warn("No route matched", window.location.pathname, "→ normalized", path, "routes=", routes.length);
-  if (typeof window.__clipradarFallback === "function") {
-    window.__clipradarFallback(path);
+  if (typeof window.__clipradrFallback === "function") {
+    window.__clipradrFallback(path);
     return;
   }
   if (routes.length === 0) {

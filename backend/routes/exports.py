@@ -74,7 +74,7 @@ def create_export(
         raise HTTPException(
             400,
             "Clip export runs on the local app (or a dedicated worker), not Vercel serverless. "
-            "Start ClipRadar locally to download MP4 clips.",
+            "Start ClipRadr locally to download MP4 clips.",
         )
 
     require_export_quota(db, auth)

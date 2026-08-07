@@ -21,7 +21,7 @@ STATIC = FRONTEND / "static"
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="ClipRadar", version="0.1.0")
+    app = FastAPI(title="ClipRadr", version="0.1.0")
 
     Base.metadata.create_all(bind=engine)
     ensure_schema_patches()
@@ -86,7 +86,7 @@ def create_app() -> FastAPI:
         return {
             "ok": True,
             "demo_mode": settings.demo_mode,
-            "app": "ClipRadar",
+            "app": "ClipRadr",
         }
 
     @app.get("/api/status")
@@ -125,7 +125,7 @@ def create_app() -> FastAPI:
             hint = "YouTube API connected. Add a creator to import + scan."
 
         return {
-            "app": "ClipRadar",
+            "app": "ClipRadr",
             "demo_mode": settings.demo_mode,
             "credentials": {
                 "youtube_api_key": configured,

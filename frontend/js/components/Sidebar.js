@@ -25,7 +25,7 @@ export function renderShell(
     el("div", { class: "brand" }, [
       el("div", { class: "brand-mark", text: "CR" }),
       el("div", {}, [
-        el("div", { class: "brand-name", text: "ClipRadar" }),
+        el("div", { class: "brand-name", text: "ClipRadr" }),
         el("div", { class: "brand-sub", text: "Editor Workstation" }),
       ]),
     ])

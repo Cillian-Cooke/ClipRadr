@@ -7,7 +7,7 @@ export function renderLanding() {
     el("div", { class: "landing-copy" }, [
       el("div", { class: "brand" }, [
         el("div", { class: "brand-mark", text: "CR" }),
-        el("div", { class: "brand-name", text: "ClipRadar" }),
+        el("div", { class: "brand-name", text: "ClipRadr" }),
       ]),
       el("h1", { text: "Find the moments worth clipping." }),
       el("p", {
