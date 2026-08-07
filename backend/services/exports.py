@@ -1,15 +1,15 @@
-"""Export job orchestration."""
+"""Export job orchestration — local SourceMedia or YouTube section via yt-dlp."""
 
 from __future__ import annotations
 
 import threading
 import uuid
-from pathlib import Path
 
 from sqlalchemy.orm import Session
 
 from backend.database import models
 from backend.services.ffmpeg import export_clip, exports_dir, ffmpeg_available
+from backend.services.ytdlp import YtDlpError, export_youtube_clip, ytdlp_available
 
 
 def create_export_job(
@@ -67,9 +67,22 @@ def run_export_job(db: Session, job_id: int) -> models.ExportJob:
             .filter(models.SourceMedia.video_id == job.video_id)
             .first()
         )
-    if source is None:
+
+    video = db.get(models.Video, job.video_id) if job.video_id else None
+    youtube_id = video.youtube_video_id if video else None
+
+    if source is None and not youtube_id:
         job.status = "FAILED"
-        job.error = "No authorized/demo source media linked to this video."
+        job.error = "No local source media and no YouTube video id — cannot export."
+        db.commit()
+        return job
+
+    if source is None and not ytdlp_available():
+        job.status = "FAILED"
+        job.error = (
+            "No local source media. Install yt-dlp (`pip install yt-dlp`) "
+            "to auto-download the clip range from YouTube."
+        )
         db.commit()
         return job
 
@@ -81,23 +94,38 @@ def run_export_job(db: Session, job_id: int) -> models.ExportJob:
     out_path = exports_dir() / out_name
 
     try:
-        job.progress = 40
-        db.commit()
-        export_clip(
-            source_path=source.path,
-            output_path=out_path,
-            start_seconds=job.start_seconds,
-            end_seconds=job.end_seconds,
-            aspect_ratio=job.aspect_ratio,
-            width=job.width,
-            height=job.height,
-            crop_position=job.crop_position,
-        )
+        if source is not None:
+            job.progress = 40
+            db.commit()
+            export_clip(
+                source_path=source.path,
+                output_path=out_path,
+                start_seconds=job.start_seconds,
+                end_seconds=job.end_seconds,
+                aspect_ratio=job.aspect_ratio,
+                width=job.width,
+                height=job.height,
+                crop_position=job.crop_position,
+            )
+        else:
+            job.progress = 25
+            db.commit()
+            export_youtube_clip(
+                youtube_video_id=youtube_id,
+                output_path=out_path,
+                start_seconds=job.start_seconds,
+                end_seconds=job.end_seconds,
+                aspect_ratio=job.aspect_ratio,
+                width=job.width,
+                height=job.height,
+                crop_position=job.crop_position,
+            )
+
         job.status = "COMPLETED"
         job.progress = 100
         job.output_path = str(out_path)
         job.error = None
-    except Exception as exc:  # noqa: BLE001
+    except (YtDlpError, Exception) as exc:  # noqa: BLE001
         job.status = "FAILED"
         job.error = str(exc)
         job.progress = 0
@@ -112,6 +140,13 @@ def start_export_async(session_factory, job_id: int) -> None:
         db = session_factory()
         try:
             run_export_job(db, job_id)
+            # Best-effort Firestore mirror (imported lazily to avoid circular deps)
+            try:
+                from backend.services.firestore_sync import mirror_export_job
+
+                mirror_export_job(db, job_id)
+            except Exception:
+                pass
         finally:
             db.close()
 

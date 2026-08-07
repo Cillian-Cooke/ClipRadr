@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, joinedload
 from backend.config import settings
 from backend.database.database import SessionLocal, get_db
 from backend.database import models
+from backend.services.auth_deps import AuthContext, get_current_user
 from backend.services.pipeline import import_creator_videos, scan_creator, scan_video
 from backend.services.serializers import creator_to_dict, video_to_dict
 from backend.services.youtube import YouTubeAPIError, api_configured, get_channel, resolve_channel
@@ -20,13 +21,6 @@ class AddCreatorBody(BaseModel):
     url: str | None = None
     youtube_channel_id: str | None = None
     auto_scan: bool | None = None
-
-
-def _demo_user(db: Session) -> models.User:
-    user = db.query(models.User).filter_by(email="editor@clipradar.demo").first()
-    if not user:
-        raise HTTPException(500, "Demo user missing — restart the server to reseed.")
-    return user
 
 
 def _counts(db: Session, creator_id: int) -> tuple[int, int]:
@@ -54,8 +48,11 @@ def _run_scan_creator_async(creator_id: int) -> None:
 
 
 @router.get("")
-def list_creators(db: Session = Depends(get_db)):
-    user = _demo_user(db)
+def list_creators(
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+):
+    user = auth.sql_user
     links = db.query(models.UserCreator).filter_by(user_id=user.id).all()
     result = []
     for link in links:
@@ -77,14 +74,18 @@ def get_creator(creator_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("")
-def add_creator(body: AddCreatorBody, db: Session = Depends(get_db)):
+def add_creator(
+    body: AddCreatorBody,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+):
     if not api_configured():
         raise HTTPException(
             400,
             "YOUTUBE_API_KEY is not set. Add it to .env and restart, then try again.",
         )
 
-    user = _demo_user(db)
+    user = auth.sql_user
     try:
         if body.youtube_channel_id:
             info = get_channel(body.youtube_channel_id.strip())
@@ -168,8 +169,12 @@ def add_creator(body: AddCreatorBody, db: Session = Depends(get_db)):
 
 
 @router.delete("/{creator_id}")
-def remove_creator(creator_id: int, db: Session = Depends(get_db)):
-    user = _demo_user(db)
+def remove_creator(
+    creator_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+):
+    user = auth.sql_user
     link = (
         db.query(models.UserCreator)
         .filter_by(user_id=user.id, creator_id=creator_id)

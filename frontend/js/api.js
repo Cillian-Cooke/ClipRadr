@@ -1,10 +1,20 @@
+import { getIdToken } from "./auth.js";
+
 async function request(path, options = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {}),
+  };
+  try {
+    const token = await getIdToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+  } catch {
+    /* no auth yet */
+  }
+
   const res = await fetch(path, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
     ...options,
+    headers,
   });
   let data = null;
   const text = await res.text();
@@ -18,6 +28,37 @@ async function request(path, options = {}) {
     throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
   }
   return data;
+}
+
+/** Download a protected file using the Firebase ID token. */
+export async function downloadAuthed(url, filename = "clip.mp4") {
+  const headers = {};
+  try {
+    const token = await getIdToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+  } catch {
+    /* bypass mode */
+  }
+  const res = await fetch(url, { headers });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = text;
+    try {
+      msg = JSON.parse(text)?.detail || text;
+    } catch {
+      /* keep */
+    }
+    throw new Error(typeof msg === "string" ? msg : "Download failed");
+  }
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  a.download = filename;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(objectUrl);
 }
 
 export const api = {
@@ -44,6 +85,8 @@ export const api = {
   saveClip: (body) => request("/api/clips", { method: "POST", body: JSON.stringify(body) }),
   exportClip: (body) => request("/api/export", { method: "POST", body: JSON.stringify(body) }),
   exportStatus: (id) => request(`/api/export/${id}`),
+  listExports: () => request("/api/account/exports"),
+  me: () => request("/api/account/me"),
   status: () => request("/api/status"),
   statusCheck: () => request("/api/status?check_youtube=1"),
   scanCreator: (id) => request(`/api/creators/${id}/scan`, { method: "POST" }),

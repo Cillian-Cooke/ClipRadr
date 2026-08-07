@@ -4,6 +4,7 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+node_modules/
 data/*.db
 data/*.db-journal
 media/exports/*
@@ -16,3 +17,6 @@ media/demo/*.mp4
 .idea/
 .vscode/
 .local/
+secrets/
+frontend/js/firebase-config.js
+**/firebase-service-account*.json

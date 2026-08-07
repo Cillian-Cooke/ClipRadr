@@ -1,17 +1,24 @@
-import { api } from "../api.js";
+import { api, downloadAuthed, formatTime } from "../api.js";
 import { el, loading, error } from "../components/Sidebar.js";
 
 export async function renderSettings(root) {
   root.replaceChildren(loading());
   try {
-    const status = await api.statusCheck();
+    const [status, me, exportsRes] = await Promise.all([
+      api.statusCheck(),
+      api.me().catch(() => null),
+      api.listExports().catch(() => ({ exports: [] })),
+    ]);
     const ytPresent = status.credentials.youtube_api_key;
     const ytOk = !!status.credentials.youtube_api_valid;
     const ytError = status.credentials.youtube_api_error;
     const ffmpeg = status.capabilities.export_clips;
+    const ytdlp = !!status.capabilities.ytdlp;
+    const ytExport = !!status.capabilities.export_youtube_clips;
     const onVercel = status.setup.platform === "vercel";
     const durable = !!status.credentials.database_durable;
     const dbBackend = status.credentials.database_backend || "unknown";
+    const auth = status.auth || {};
 
     let ytLabel = "Not configured";
     let ytHint = onVercel
@@ -25,8 +32,8 @@ export async function renderSettings(root) {
       ytHint =
         ytError ||
         (onVercel
-          ? "A key is set on Vercel, but YouTube rejected it. Re-paste the key (no quotes), enable YouTube Data API v3, set Application restrictions to None, then redeploy."
-          : "A key is set in .env, but YouTube rejected it. Check the value and API restrictions.");
+          ? "A key is set on Vercel, but YouTube rejected it."
+          : "A key is set in .env, but YouTube rejected it.");
     }
 
     const dbLabel = durable
@@ -38,13 +45,15 @@ export async function renderSettings(root) {
       ? dbBackend === "postgres"
         ? "Creators, videos, and moments survive Vercel cold starts."
         : "Local disk SQLite is fine for development."
-      : "Vercel wipes /tmp on cold starts. Add a Neon DATABASE_URL or creators will keep disappearing.";
+      : "Vercel wipes /tmp on cold starts. Add a Neon DATABASE_URL.";
 
     const setupText = !durable && onVercel
       ? "1. Create a free Neon project → copy the pooled connection string\n2. Vercel → Settings → Environment Variables\n   DATABASE_URL = postgresql://…?sslmode=require\n   YOUTUBE_API_KEY = your key\n   DEMO_MODE = false\n3. Deployments → Redeploy"
       : onVercel
-        ? "Vercel → your project → Settings → Environment Variables\nName: YOUTUBE_API_KEY\nValue: paste key with no quotes\nEnvironments: Production (+ Preview)\nThen: Deployments → Redeploy"
-        : `# ${status.setup.env_file}\nYOUTUBE_API_KEY=your_key_here\n\n# Restart:\nuvicorn backend.main:app --reload --host 0.0.0.0 --port 8001`;
+        ? "Vercel → your project → Settings → Environment Variables"
+        : `# ${status.setup.env_file}\nYOUTUBE_API_KEY=your_key_here\nFIREBASE_PROJECT_ID=...\nFIREBASE_CREDENTIALS_PATH=./secrets/firebase-service-account.json\nFIREBASE_WEB_API_KEY=...\n\n# Restart:\nuvicorn backend.main:app --reload --host 127.0.0.1 --port 8001`;
+
+    const finished = exportsRes.exports || [];
 
     root.replaceChildren(
       el("div", {}, [
@@ -52,37 +61,102 @@ export async function renderSettings(root) {
           el("h1", { text: "Settings" }),
           el("p", {
             text: onVercel
-              ? "Credentials come from Vercel Environment Variables (not .env on the server)."
-              : "Credentials and pipeline defaults. Keys stay server-side in .env.",
+              ? "Credentials come from Vercel Environment Variables."
+              : "Credentials, account, and finished clip exports.",
           }),
         ]),
 
-        !durable && onVercel
-          ? el("div", {
-              class: "stat-card",
-              style:
-                "max-width:640px;margin-bottom:16px;border-color:color-mix(in srgb, #b45309 45%, var(--border-subtle));",
-            }, [
-              el("div", { class: "label", text: "Action required" }),
-              el("div", { class: "value", style: "font-size:18px;", text: "Add Neon DATABASE_URL" }),
-              el("p", {
-                class: "muted",
-                style: "margin:8px 0 0;line-height:1.5;",
-                text: status.setup.hint,
-              }),
-            ])
-          : null,
+        el("div", { class: "section-title", text: "Account" }),
+        me
+          ? card(
+              "Signed in",
+              me.bypass ? `${me.email} (local bypass)` : me.email || me.name,
+              me.bypass
+                ? "Firebase not configured — using local workspace user. Add FIREBASE_* to .env when ready."
+                : `Plan: ${me.plan}. Free plan = ${status.limits?.free_exports_per_day || 3} exports/day. Set users/{uid}.plan = "pro" in Firestore to upgrade.`,
+              !me.bypass
+            )
+          : card("Signed in", "Unknown", "Could not load /api/account/me"),
 
-        el("div", { class: "section-title", text: "Credentials" }),
+        card(
+          "Firebase",
+          auth.firebase_ready ? "Admin ready" : "Not configured",
+          auth.firebase_ready
+            ? "Auth tokens verified; users/exports mirrored to Firestore."
+            : "Add service account + web config to .env (see .env.example). Until then, local bypass stays on.",
+          !!auth.firebase_ready
+        ),
+
+        el("div", { class: "section-title", style: "margin-top:28px;", text: "Finished exports" }),
+        finished.length
+          ? el(
+              "div",
+              { class: "card-list", style: "max-width:640px;" },
+              finished.map((ex) => {
+                const label =
+                  ex.start_label && ex.end_label
+                    ? `${ex.start_label} → ${ex.end_label}`
+                    : ex.startSeconds != null
+                      ? `${formatTime(ex.startSeconds)} → ${formatTime(ex.endSeconds)}`
+                      : "Clip";
+                const row = el("div", { class: "opportunity-card" }, [
+                  el("div", {}, [
+                    el("h3", {
+                      text: `Video #${ex.videoId || ex.sqlJobId || "—"}`,
+                      style: "margin:0;font-size:15px;",
+                    }),
+                    el("div", { class: "muted", text: `${label} · ${ex.status}` }),
+                    ex.error
+                      ? el("div", { class: "muted", style: "color:#b45309;", text: ex.error })
+                      : null,
+                  ]),
+                  ex.downloadUrl && ex.status === "COMPLETED"
+                    ? el("button", {
+                        class: "btn btn-sm btn-primary",
+                        text: "Download",
+                        onclick: async (e) => {
+                          const btn = e.currentTarget;
+                          btn.disabled = true;
+                          try {
+                            await downloadAuthed(ex.downloadUrl, `clip_${ex.sqlJobId || "export"}.mp4`);
+                          } catch (err) {
+                            alert(err.message);
+                          } finally {
+                            btn.disabled = false;
+                          }
+                        },
+                      })
+                    : el("span", { class: "badge", text: ex.status || "—" }),
+                ]);
+                return row;
+              })
+            )
+          : el("div", {
+              class: "muted",
+              style: "margin-bottom:16px;",
+              text: "No exports yet. Open a video, set IN/OUT, then Export MP4.",
+            }),
+
+        el("div", { class: "section-title", style: "margin-top:28px;", text: "Credentials" }),
         card("YouTube Data API", ytLabel, ytHint, ytOk),
         card("Database", dbLabel, dbHint, durable),
         card(
           "FFmpeg export",
           ffmpeg ? "Ready" : "Missing",
           ffmpeg
-            ? "Clip export can generate real MP4 files from local/demo source media."
+            ? "Local source and YouTube section clips can be encoded to MP4."
             : "Install ffmpeg (or keep imageio-ffmpeg) to export clips.",
           ffmpeg
+        ),
+        card(
+          "yt-dlp (YouTube clips)",
+          ytExport ? "Ready" : ytdlp ? "Installed (Vercel blocked)" : "Missing",
+          ytExport
+            ? "Can auto-download the selected IN→OUT range from YouTube."
+            : ytdlp
+              ? "yt-dlp is present but clip export is disabled on Vercel serverless — run locally."
+              : "pip install yt-dlp  — required for live YouTube clip download without attached media.",
+          ytExport
         ),
         card(
           "OpenAI embeddings",

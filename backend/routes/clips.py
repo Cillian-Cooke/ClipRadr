@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from backend.database.database import get_db
 from backend.database import models
+from backend.services.auth_deps import AuthContext, get_current_user
 from backend.services.serializers import fmt_ts, moment_to_dict
 
 router = APIRouter(prefix="/api/clips", tags=["clips"])
@@ -34,13 +35,6 @@ class PatchClipBody(BaseModel):
     status: str | None = None
 
 
-def _demo_user(db: Session) -> models.User:
-    user = db.query(models.User).filter_by(email="editor@clipradar.demo").first()
-    if not user:
-        raise HTTPException(500, "Demo user missing")
-    return user
-
-
 def _clip_dict(clip: models.SavedClip) -> dict:
     moment = clip.moment
     return {
@@ -63,8 +57,10 @@ def _clip_dict(clip: models.SavedClip) -> dict:
 
 
 @router.get("")
-def list_clips(db: Session = Depends(get_db)):
-    user = _demo_user(db)
+def list_clips(
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+):
     clips = (
         db.query(models.SavedClip)
         .options(
@@ -72,7 +68,7 @@ def list_clips(db: Session = Depends(get_db)):
             .joinedload(models.Moment.video)
             .joinedload(models.Video.creator)
         )
-        .filter_by(user_id=user.id)
+        .filter_by(user_id=auth.sql_user.id)
         .order_by(models.SavedClip.created_at.desc())
         .all()
     )
@@ -80,13 +76,16 @@ def list_clips(db: Session = Depends(get_db)):
 
 
 @router.post("")
-def save_clip(body: SaveClipBody, db: Session = Depends(get_db)):
-    user = _demo_user(db)
+def save_clip(
+    body: SaveClipBody,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+):
     moment = db.get(models.Moment, body.moment_id)
     if not moment:
         raise HTTPException(404, "Moment not found")
     clip = models.SavedClip(
-        user_id=user.id,
+        user_id=auth.sql_user.id,
         moment_id=body.moment_id,
         start_seconds=body.start_seconds,
         end_seconds=body.end_seconds,
@@ -115,9 +114,13 @@ def save_clip(body: SaveClipBody, db: Session = Depends(get_db)):
 
 
 @router.patch("/{clip_id}")
-def patch_clip(clip_id: int, body: PatchClipBody, db: Session = Depends(get_db)):
-    user = _demo_user(db)
-    clip = db.query(models.SavedClip).filter_by(id=clip_id, user_id=user.id).first()
+def patch_clip(
+    clip_id: int,
+    body: PatchClipBody,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+):
+    clip = db.query(models.SavedClip).filter_by(id=clip_id, user_id=auth.sql_user.id).first()
     if not clip:
         raise HTTPException(404, "Clip not found")
     for field, value in body.model_dump(exclude_unset=True).items():
@@ -128,9 +131,12 @@ def patch_clip(clip_id: int, body: PatchClipBody, db: Session = Depends(get_db))
 
 
 @router.delete("/{clip_id}")
-def delete_clip(clip_id: int, db: Session = Depends(get_db)):
-    user = _demo_user(db)
-    clip = db.query(models.SavedClip).filter_by(id=clip_id, user_id=user.id).first()
+def delete_clip(
+    clip_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+):
+    clip = db.query(models.SavedClip).filter_by(id=clip_id, user_id=auth.sql_user.id).first()
     if not clip:
         raise HTTPException(404, "Clip not found")
     db.delete(clip)

@@ -21,6 +21,7 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     email = Column(String(255), unique=True, nullable=False)
     name = Column(String(255), nullable=False)
+    firebase_uid = Column(String(128), unique=True, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     creators = relationship("UserCreator", back_populates="user")

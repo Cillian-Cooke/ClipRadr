@@ -15,9 +15,14 @@
     <link rel="stylesheet" href="/css/components.css" />
     <link rel="stylesheet" href="/css/video.css" />
     <link rel="stylesheet" href="/css/modal.css" />
+    <!-- Local Firebase compat (no CDN) -->
+    <script src="/vendor/firebase/firebase-app-compat.js"></script>
+    <script src="/vendor/firebase/firebase-auth-compat.js"></script>
   </head>
   <body>
-    <div id="app"></div>
-    <script type="module" src="/js/app.js"></script>
+    <div id="app">
+      <div class="loading-state">Starting ClipRadar…</div>
+    </div>
+    <script type="module" src="/js/app.js?v=20260807c"></script>
   </body>
 </html>

@@ -38,6 +38,19 @@ class Settings(BaseSettings):
     recent_videos_limit: int = 10 if IS_VERCEL else 20
     auto_scan_on_add: bool = True
 
+    # Firebase (optional until credentials are provided)
+    firebase_project_id: str = ""
+    firebase_credentials_path: str = ""
+    firebase_credentials_json: str = ""  # raw JSON string alternative to path
+    firebase_web_api_key: str = ""
+    firebase_auth_domain: str = ""
+    firebase_storage_bucket: str = ""
+    firebase_messaging_sender_id: str = ""
+    firebase_app_id: str = ""
+    # When Firebase is unset, allow demo-user bypass so local work continues
+    dev_auth_bypass: bool = True
+    free_exports_per_day: int = 3
+
 
 settings = Settings()
 

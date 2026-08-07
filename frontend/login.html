@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ClipRadar — Sign in</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        min-height: 100%;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        background: #f3f4f6;
+        color: #171a21;
+      }
+      .wrap {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+      }
+      .card {
+        width: min(420px, 100%);
+        background: #fff;
+        border: 1px solid #d8dde6;
+        border-radius: 10px;
+        padding: 28px;
+        box-shadow: 0 8px 24px rgba(23, 26, 33, 0.08);
+      }
+      h1 { margin: 0 0 8px; font-size: 22px; }
+      p { margin: 0 0 16px; color: #5a6475; line-height: 1.45; }
+      label { display: block; font-size: 12px; color: #5a6475; margin: 0 0 6px; }
+      input {
+        width: 100%;
+        padding: 10px 12px;
+        margin-bottom: 12px;
+        border: 1px solid #d8dde6;
+        border-radius: 8px;
+        background: #f7f8fa;
+        font-size: 14px;
+        color: #171a21;
+      }
+      .actions { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+      button {
+        appearance: none;
+        border: 1px solid #d8dde6;
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        background: #fff;
+        color: #171a21;
+      }
+      button.primary {
+        background: #e36a1a;
+        border-color: #e36a1a;
+        color: #fff;
+      }
+      button:disabled { opacity: 0.6; cursor: default; }
+      #status {
+        min-height: 20px;
+        margin: 4px 0 8px;
+        color: #5a6475;
+        font-size: 13px;
+      }
+      #status.err { color: #b42318; }
+      .mark {
+        width: 28px; height: 28px; border-radius: 6px;
+        background: #e36a1a; color: #fff; display: grid; place-items: center;
+        font-size: 12px; font-weight: 700;
+      }
+      .brand { display: flex; gap: 10px; align-items: center; margin-bottom: 18px; }
+      .brand strong { display: block; }
+      .brand span { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #8a93a3; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <div class="brand">
+          <div class="mark">CR</div>
+          <div>
+            <strong>ClipRadar</strong>
+            <span>Sign in</span>
+          </div>
+        </div>
+        <h1>Welcome back</h1>
+        <p>Create an account or sign in. If this card is visible, the page loaded.</p>
+        <label for="email">Email</label>
+        <input id="email" type="email" autocomplete="email" placeholder="you@example.com" />
+        <label for="password">Password</label>
+        <input id="password" type="password" autocomplete="current-password" placeholder="Min 6 characters" />
+        <label for="name">Name (for new accounts)</label>
+        <input id="name" type="text" autocomplete="name" placeholder="Optional display name" />
+        <div id="status">Loading Firebase…</div>
+        <div class="actions">
+          <button class="primary" id="btn-in" type="button">Sign in</button>
+          <button id="btn-up" type="button">Create account</button>
+          <button id="btn-google" type="button">Continue with Google</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/vendor/firebase/firebase-app-compat.js"></script>
+    <script src="/vendor/firebase/firebase-auth-compat.js"></script>
+    <script>
+      (function () {
+        var statusEl = document.getElementById("status");
+        function setStatus(msg, isErr) {
+          statusEl.textContent = msg || "";
+          statusEl.className = isErr ? "err" : "";
+        }
+
+        function friendly(err) {
+          var c = (err && err.code) || "";
+          if (c.indexOf("operation-not-allowed") !== -1)
+            return "Enable Email/Password in Firebase Console → Authentication → Sign-in method.";
+          if (c.indexOf("unauthorized-domain") !== -1)
+            return "Add localhost / 127.0.0.1 to Firebase Authorized domains.";
+          if (c.indexOf("email-already-in-use") !== -1) return "Account exists — use Sign in.";
+          if (c.indexOf("invalid-credential") !== -1 || c.indexOf("wrong-password") !== -1)
+            return "Wrong email or password.";
+          if (c.indexOf("weak-password") !== -1) return "Password must be at least 6 characters.";
+          if (c.indexOf("invalid-email") !== -1) return "Enter a valid email.";
+          return (err && err.message) || String(err);
+        }
+
+        function disable(busy) {
+          ["btn-in", "btn-up", "btn-google"].forEach(function (id) {
+            document.getElementById(id).disabled = !!busy;
+          });
+        }
+
+        async function boot() {
+          if (!window.firebase) {
+            setStatus("Firebase scripts failed to load from /vendor/firebase. Is the server running?", true);
+            return;
+          }
+
+          var cfg;
+          try {
+            var res = await fetch("/api/status");
+            var data = await res.json();
+            cfg = data && data.auth && data.auth.web_config;
+          } catch (e) {
+            setStatus("API unreachable: " + e.message, true);
+            return;
+          }
+
+          if (!cfg || !cfg.apiKey) {
+            setStatus("Firebase web config missing on server (.env).", true);
+            return;
+          }
+
+          try {
+            if (!firebase.apps.length) firebase.initializeApp(cfg);
+            var auth = firebase.auth();
+            setStatus("Ready — sign in or create an account.");
+
+            auth.onAuthStateChanged(function (user) {
+              if (user) window.location.replace("/home");
+            });
+
+            document.getElementById("btn-in").onclick = async function () {
+              disable(true);
+              setStatus("Signing in…");
+              try {
+                await auth.signInWithEmailAndPassword(
+                  document.getElementById("email").value.trim(),
+                  document.getElementById("password").value
+                );
+                window.location.replace("/home");
+              } catch (e) {
+                setStatus(friendly(e), true);
+                disable(false);
+              }
+            };
+
+            document.getElementById("btn-up").onclick = async function () {
+              disable(true);
+              setStatus("Creating account…");
+              try {
+                var cred = await auth.createUserWithEmailAndPassword(
+                  document.getElementById("email").value.trim(),
+                  document.getElementById("password").value
+                );
+                var n = document.getElementById("name").value.trim();
+                if (n) await cred.user.updateProfile({ displayName: n });
+                window.location.replace("/home");
+              } catch (e) {
+                setStatus(friendly(e), true);
+                disable(false);
+              }
+            };
+
+            document.getElementById("btn-google").onclick = async function () {
+              disable(true);
+              setStatus("Opening Google…");
+              try {
+                await auth.signInWithPopup(new firebase.auth.GoogleAuthProvider());
+                window.location.replace("/home");
+              } catch (e) {
+                setStatus(friendly(e), true);
+                disable(false);
+              }
+            };
+          } catch (e) {
+            setStatus("Firebase init failed: " + (e.message || e), true);
+          }
+        }
+
+        boot();
+      })();
+    </script>
+  </body>
+</html>

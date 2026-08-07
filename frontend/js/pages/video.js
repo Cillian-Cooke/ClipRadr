@@ -1,4 +1,4 @@
-import { api, formatTime } from "../api.js";
+import { api, formatTime, downloadAuthed } from "../api.js";
 import { navigate } from "../router.js";
 import { el, loading, error } from "../components/Sidebar.js";
 
@@ -689,27 +689,54 @@ async function saveCurrent(state) {
 }
 
 function openExportModal(state) {
-  if (!state.video.has_source_media) {
-    flash("No local source — open the demo VOD to export.");
+  const hasLocal = !!state.video.has_source_media;
+  const hasYt = !!state.video.youtube_video_id;
+  if (!hasLocal && !hasYt) {
+    flash("This video has no local source and no YouTube id — cannot export.");
     return;
   }
+
   const backdrop = el("div", { class: "modal-backdrop" });
   const progress = el("div", { class: "progress-bar" }, [el("span")]);
-  const status = el("div", { class: "muted", text: "Ready." });
-  const downloadBtn = el("a", {
+  const status = el("div", {
+    class: "muted",
+    text: hasLocal
+      ? "Ready — will cut from local source."
+      : "Ready — will auto-fetch this range from YouTube (yt-dlp).",
+  });
+  const downloadBtn = el("button", {
     class: "btn btn-primary",
     text: "Download Clip",
     style: "display:none;",
+  });
+  let downloadUrl = null;
+  downloadBtn.addEventListener("click", async () => {
+    if (!downloadUrl) return;
+    downloadBtn.disabled = true;
+    downloadBtn.textContent = "Downloading…";
+    try {
+      await downloadAuthed(downloadUrl, `clipradar_${state.video.id}_${Math.round(state.clipStart)}.mp4`);
+      downloadBtn.textContent = "Download Clip";
+      downloadBtn.disabled = false;
+    } catch (err) {
+      status.textContent = err.message;
+      downloadBtn.textContent = "Download Clip";
+      downloadBtn.disabled = false;
+    }
   });
   const dur = Math.round(state.clipEnd - state.clipStart);
 
   const modal = el("div", { class: "modal" }, [
     el("h2", { text: "Export clip" }),
-    el("p", { text: "YouTube 1920×1080 MP4 from the selected range." }),
+    el("p", {
+      text: hasLocal
+        ? "YouTube 1920×1080 MP4 from the selected range (local source)."
+        : "Fetches only the selected range from YouTube, then encodes 1920×1080 MP4.",
+    }),
     el("div", { class: "export-summary" }, [
       summary("Range", `${formatTime(state.clipStart)} → ${formatTime(state.clipEnd)}`),
       summary("Duration", `${dur}s`),
-      summary("Format", "MP4"),
+      summary("Source", hasLocal ? "Local file" : "YouTube (auto)"),
       summary("Size", "1920 × 1080"),
     ]),
     progress,
@@ -723,15 +750,19 @@ function openExportModal(state) {
         onclick: async (e) => {
           const btn = e.currentTarget;
           btn.disabled = true;
-          status.textContent = "Generating…";
+          status.textContent = hasLocal ? "Encoding…" : "Fetching clip from YouTube…";
           progress.firstChild.style.width = "15%";
           try {
-            let start = mapToFileTime(state, state.clipStart);
-            let end = mapToFileTime(state, state.clipEnd);
-            if (state.fileDuration) {
-              if (end <= start) end = Math.min(state.fileDuration, start + Math.max(1, dur));
-              end = Math.min(end, state.fileDuration);
-              start = Math.min(start, end - 0.5);
+            let start = state.clipStart;
+            let end = state.clipEnd;
+            if (hasLocal) {
+              start = mapToFileTime(state, state.clipStart);
+              end = mapToFileTime(state, state.clipEnd);
+              if (state.fileDuration) {
+                if (end <= start) end = Math.min(state.fileDuration, start + Math.max(1, dur));
+                end = Math.min(end, state.fileDuration);
+                start = Math.min(start, end - 0.5);
+              }
             }
             let job = await api.exportClip({
               video_id: state.video.id,
@@ -744,17 +775,20 @@ function openExportModal(state) {
               crop_position: "CENTER",
             });
             while (job.status === "QUEUED" || job.status === "PROCESSING") {
-              await sleep(400);
+              await sleep(700);
               job = await api.exportStatus(job.id);
-              progress.firstChild.style.width = `${Math.max(job.progress, 20)}%`;
-              status.textContent = `Generating… ${job.progress}%`;
+              const p = Math.max(job.progress || 0, 20);
+              progress.firstChild.style.width = `${p}%`;
+              status.textContent =
+                p < 40 && !hasLocal
+                  ? `Fetching clip… ${p}%`
+                  : `Encoding… ${p}%`;
             }
             if (job.status === "COMPLETED") {
               progress.firstChild.style.width = "100%";
               status.textContent = "Ready.";
               downloadBtn.style.display = "inline-flex";
-              downloadBtn.href = job.download_url;
-              downloadBtn.setAttribute("download", "");
+              downloadUrl = job.download_url;
             } else {
               status.textContent = job.error || "Export failed.";
               btn.disabled = false;

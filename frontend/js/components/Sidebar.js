@@ -1,6 +1,7 @@
 import { navigate } from "../router.js";
 import { store } from "../store.js";
 import { looksLikeChannelQuery, openAddCreatorModal } from "./AddCreator.js";
+import { api } from "../api.js";
 
 const NAV = [
   { href: "/home", label: "Home", icon: "⌂" },
@@ -120,6 +121,50 @@ export function renderShell(
         }),
     })
   );
+
+  // Account chip (plan / sign out) — filled async
+  const accountWrap = el("div", { class: "topbar-account", style: "display:flex;align-items:center;gap:8px;" });
+  topbar.append(accountWrap);
+  import("../auth.js").then(async ({ getUser, signOut, onAuthChange, isSignedIn }) => {
+    const paint = async () => {
+      accountWrap.replaceChildren();
+      if (!isSignedIn() && !getUser()) {
+        // Avoid hammering /api/account/me with 401s before login
+        return;
+      }
+      try {
+        const me = await api.me();
+        const plan = me.plan || "free";
+        accountWrap.append(
+          el("span", {
+            class: "badge",
+            text: me.bypass ? "Local" : plan.toUpperCase(),
+            title: me.email || "",
+          })
+        );
+        if (!me.bypass) {
+          accountWrap.append(
+            el("button", {
+              class: "btn btn-sm",
+              text: "Sign out",
+              onclick: async () => {
+                await signOut();
+                navigate("/login");
+              },
+            })
+          );
+        }
+      } catch {
+        const u = getUser();
+        if (u) {
+          accountWrap.append(el("span", { class: "badge", text: u.email || "Signed in" }));
+        }
+      }
+    };
+    paint();
+    onAuthChange(() => paint());
+  }).catch(() => {});
+
   if (topbarExtra) topbar.append(topbarExtra);
 
   const content = el("div", { class: `content ${contentClass}`.trim() });
