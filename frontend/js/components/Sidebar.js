@@ -55,7 +55,6 @@ export function renderShell(
   const updatePill = () => {
     const { pending, busy } = store.scanProgress();
     const creators = store.get().creators || [];
-    const followed = store.get().followedChannels || [];
     const moments = store.get().home?.stats?.clip_moments_found || 0;
     const videos = store.get().home?.stats?.videos_scanned || 0;
 
@@ -70,9 +69,6 @@ export function renderShell(
             ? `${videos} videos · ready`
             : `${creators.length} creator${creators.length === 1 ? "" : "s"}`;
       scanPill.classList.remove("scanning");
-    } else if (followed.length) {
-      scanPill.textContent = "Restoring creators…";
-      scanPill.classList.add("scanning");
     } else {
       scanPill.textContent = "Ready";
       scanPill.classList.remove("scanning");

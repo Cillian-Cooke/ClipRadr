@@ -13,7 +13,7 @@ import { renderSettings } from "./pages/settings.js";
 import { renderVideosIndex } from "./pages/videos.js";
 import { renderLogin } from "./pages/login.js";
 import { store } from "./store.js";
-import { initAuth, onAuthChange, isSignedIn } from "./auth.js";
+import { initAuth, onAuthChange, isSignedIn, getUser } from "./auth.js";
 import {
   startBackgroundWorker,
   restoreFollowedCreators,
@@ -82,6 +82,8 @@ route("/search", () => mount("/search", renderSearch));
 
 function startWorkspaceSync() {
   if (authRequired && !isSignedIn()) return;
+  const user = getUser();
+  store.bindAccount(user?.uid || null);
   restoreFollowedCreators()
     .catch((e) => console.warn("restore failed", e))
     .finally(() => kickBackgroundScans());
@@ -124,6 +126,7 @@ async function boot() {
   }
 
   onAuthChange((user) => {
+    store.bindAccount(user?.uid || null);
     if (authRequired && !user) {
       window.location.replace("/login");
       return;

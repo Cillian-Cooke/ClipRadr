@@ -72,10 +72,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify(typeof payload === "string" ? { url: payload } : payload),
     }),
+  removeCreator: (id) => request(`/api/creators/${id}`, { method: "DELETE" }),
   searchChannels: (q) => request(`/api/youtube/search-channels?q=${encodeURIComponent(q)}`),
   video: (id) => request(`/api/videos/${id}`),
   videoMoments: (id) => request(`/api/videos/${id}/moments`),
-  moment: (id) => request(`/api/moments/${id}`),
+  moment: (id, { includeRelated = false } = {}) =>
+    request(`/api/moments/${id}${includeRelated ? "?include_related=1" : ""}`),
+  momentComments: (id) => request(`/api/moments/${id}/comments`),
   opportunities: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request(`/api/opportunities${qs ? `?${qs}` : ""}`);

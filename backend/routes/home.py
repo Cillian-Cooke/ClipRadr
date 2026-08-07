@@ -7,33 +7,64 @@ from sqlalchemy.orm import Session, joinedload
 
 from backend.database.database import get_db
 from backend.database import models
+from backend.services.auth_deps import AuthContext, get_current_user
 from backend.services.serializers import moment_to_dict
 
 router = APIRouter(prefix="/api", tags=["home"])
 
 
-@router.get("/home")
-def home_stats(db: Session = Depends(get_db)):
-    creators = db.query(models.Creator).filter_by(is_demo=0).count()
-    videos = db.query(models.Video).filter_by(is_demo=0).count()
-    moments = (
-        db.query(models.Moment)
-        .join(models.Video)
-        .filter(models.Video.is_demo == 0)
-        .count()
-    )
-    exports = db.query(models.ExportJob).filter_by(status="COMPLETED").count()
-    saved = db.query(models.SavedClip).count()
-
-    top = (
-        db.query(models.Moment)
-        .join(models.Video)
-        .options(joinedload(models.Moment.video).joinedload(models.Video.creator))
-        .filter(models.Video.is_demo == 0)
-        .order_by(models.Moment.score.desc())
-        .limit(8)
+def _followed_creator_ids(db: Session, user_id: int) -> list[int]:
+    rows = (
+        db.query(models.UserCreator.creator_id)
+        .filter_by(user_id=user_id)
         .all()
     )
+    return [r[0] for r in rows]
+
+
+@router.get("/home")
+def home_stats(
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+):
+    """Workspace home — scoped to the signed-in user's followed creators."""
+    user = auth.sql_user
+    creator_ids = _followed_creator_ids(db, user.id)
+
+    creators = len(creator_ids)
+    if creator_ids:
+        videos = (
+            db.query(models.Video)
+            .filter(models.Video.is_demo == 0, models.Video.creator_id.in_(creator_ids))
+            .count()
+        )
+        moments = (
+            db.query(models.Moment)
+            .join(models.Video)
+            .filter(models.Video.is_demo == 0, models.Video.creator_id.in_(creator_ids))
+            .count()
+        )
+        top = (
+            db.query(models.Moment)
+            .join(models.Video)
+            .options(joinedload(models.Moment.video).joinedload(models.Video.creator))
+            .filter(models.Video.is_demo == 0, models.Video.creator_id.in_(creator_ids))
+            .order_by(models.Moment.score.desc())
+            .limit(8)
+            .all()
+        )
+    else:
+        videos = 0
+        moments = 0
+        top = []
+
+    exports = (
+        db.query(models.ExportJob)
+        .filter_by(user_id=user.id, status="COMPLETED")
+        .count()
+    )
+    saved = db.query(models.SavedClip).filter_by(user_id=user.id).count()
+
     top_items = []
     for m in top:
         item = moment_to_dict(m, include_video=True)
@@ -79,11 +110,23 @@ def opportunities(
     topic: str | None = None,
     sort: str = Query("score"),
     db: Session = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
 ):
-    q = db.query(models.Moment).options(
-        joinedload(models.Moment.video).joinedload(models.Video.creator)
-    ).join(models.Video).filter(models.Video.is_demo == 0)
+    """Clip opportunities for creators this account follows."""
+    user = auth.sql_user
+    followed = _followed_creator_ids(db, user.id)
+    if not followed:
+        return {"moments": []}
+
+    q = (
+        db.query(models.Moment)
+        .options(joinedload(models.Moment.video).joinedload(models.Video.creator))
+        .join(models.Video)
+        .filter(models.Video.is_demo == 0, models.Video.creator_id.in_(followed))
+    )
     if creator_id:
+        if creator_id not in followed:
+            return {"moments": []}
         q = q.filter(models.Video.creator_id == creator_id)
     if topic:
         q = q.filter(models.Moment.topic.ilike(f"%{topic}%"))

@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from backend.config import IS_VERCEL
@@ -46,9 +47,16 @@ def get_video(video_id: int, db: Session = Depends(get_db)):
     )
     if not video:
         raise HTTPException(404, "Video not found")
-    moments = db.query(models.Moment).filter_by(video_id=video.id).all()
-    high = sum(1 for m in moments if m.score >= 80)
-    data = video_to_dict(video, moment_count=len(moments), high_confidence=high)
+    moment_count = (
+        db.query(func.count(models.Moment.id)).filter_by(video_id=video.id).scalar() or 0
+    )
+    high = (
+        db.query(func.count(models.Moment.id))
+        .filter(models.Moment.video_id == video.id, models.Moment.score >= 80)
+        .scalar()
+        or 0
+    )
+    data = video_to_dict(video, moment_count=moment_count, high_confidence=high)
     source = video.source_media[0] if video.source_media else None
     data["source_media"] = (
         {

@@ -3,7 +3,7 @@ import { navigate } from "../router.js";
 import { el, loading, error } from "../components/Sidebar.js";
 import { store } from "../store.js";
 import { bindLivePage } from "../live.js";
-import { kickBackgroundScans } from "../background.js";
+import { kickBackgroundScans, removeCreatorFollow } from "../background.js";
 import { refreshWorkspace } from "../refresh.js";
 
 export async function renderCreator(root, id) {
@@ -79,6 +79,24 @@ async function draw(root, id) {
       target: "_blank",
       rel: "noopener",
       text: "Open Channel",
+    }),
+    el("button", {
+      class: "btn btn-danger",
+      text: "Remove",
+      onclick: async (e) => {
+        const btn = e.currentTarget;
+        if (!confirm(`Remove ${creator.name} from your workspace?`)) return;
+        btn.disabled = true;
+        btn.textContent = "Removing…";
+        try {
+          await removeCreatorFollow(creator);
+          navigate("/creators");
+        } catch (err) {
+          alert(err.message || "Could not remove creator");
+          btn.disabled = false;
+          btn.textContent = "Remove";
+        }
+      },
     })
   );
 

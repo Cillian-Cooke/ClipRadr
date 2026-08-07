@@ -95,21 +95,55 @@ def run_export_job(db: Session, job_id: int) -> models.ExportJob:
 
     try:
         if source is not None:
-            job.progress = 40
+            job.progress = 35
             db.commit()
-            export_clip(
-                source_path=source.path,
-                output_path=out_path,
-                start_seconds=job.start_seconds,
-                end_seconds=job.end_seconds,
-                aspect_ratio=job.aspect_ratio,
-                width=job.width,
-                height=job.height,
-                crop_position=job.crop_position,
+            needs_crop = (
+                job.aspect_ratio != "16:9"
+                or (job.crop_position or "CENTER").upper() != "CENTER"
             )
+            if not needs_crop and job.width in (None, 1920) and job.height in (None, 1080):
+                # Stream-copy is near-instant when no crop/rescale is required.
+                try:
+                    export_clip(
+                        source_path=source.path,
+                        output_path=out_path,
+                        start_seconds=job.start_seconds,
+                        end_seconds=job.end_seconds,
+                        aspect_ratio=job.aspect_ratio,
+                        width=job.width,
+                        height=job.height,
+                        crop_position=job.crop_position,
+                        stream_copy=True,
+                    )
+                except Exception:
+                    export_clip(
+                        source_path=source.path,
+                        output_path=out_path,
+                        start_seconds=job.start_seconds,
+                        end_seconds=job.end_seconds,
+                        aspect_ratio=job.aspect_ratio,
+                        width=job.width,
+                        height=job.height,
+                        crop_position=job.crop_position,
+                        fast=True,
+                    )
+            else:
+                export_clip(
+                    source_path=source.path,
+                    output_path=out_path,
+                    start_seconds=job.start_seconds,
+                    end_seconds=job.end_seconds,
+                    aspect_ratio=job.aspect_ratio,
+                    width=job.width,
+                    height=job.height,
+                    crop_position=job.crop_position,
+                    fast=True,
+                )
         else:
-            job.progress = 25
-            db.commit()
+            def _progress(pct: int) -> None:
+                job.progress = max(job.progress or 0, int(pct))
+                db.commit()
+
             export_youtube_clip(
                 youtube_video_id=youtube_id,
                 output_path=out_path,
@@ -119,6 +153,7 @@ def run_export_job(db: Session, job_id: int) -> models.ExportJob:
                 width=job.width,
                 height=job.height,
                 crop_position=job.crop_position,
+                on_progress=_progress,
             )
 
         job.status = "COMPLETED"

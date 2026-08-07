@@ -127,7 +127,7 @@ export async function afterCreatorAdded(res) {
   kickBackgroundScans();
 }
 
-/** Re-import followed channels if the server forgot them (Vercel /tmp SQLite). */
+/** Re-import followed channels only when the server forgot them (ephemeral DB). */
 export async function restoreFollowedCreators() {
   if (restoring) return { restored: 0 };
   restoring = true;
@@ -143,7 +143,6 @@ export async function restoreFollowedCreators() {
     if (serverList.length) {
       store.setCreators(serverList);
       for (const c of serverList) {
-        store.rememberChannel(c);
         try {
           const vids = await api.creatorVideos(c.id);
           store.setCreatorVideos(c.id, vids.videos || []);
@@ -160,8 +159,20 @@ export async function restoreFollowedCreators() {
       return { restored: 0, synced: serverList.length };
     }
 
-    // Server is empty — previous scanDone IDs are meaningless.
+    // Server has no creators for this account.
+    store.setCreators([]);
     store.resetScanHistory();
+
+    const status = store.get().status || (await api.status().catch(() => null));
+    if (status) store.setStatus(status);
+    const durable = status?.credentials?.database_durable;
+    const ephemeral = status?.setup?.platform === "vercel" && durable === false;
+
+    // New accounts (and durable DBs) stay empty — do not re-add another user's channels.
+    if (!ephemeral) {
+      await refreshWorkspace();
+      return { restored: 0 };
+    }
 
     const followed = store.get().followedChannels || [];
     if (!followed.length) {
@@ -192,4 +203,13 @@ export async function restoreFollowedCreators() {
   } finally {
     restoring = false;
   }
+}
+
+/** Unfollow a creator and refresh home / opportunities. */
+export async function removeCreatorFollow(creator) {
+  if (!creator?.id) return;
+  await api.removeCreator(creator.id);
+  store.removeCreatorLocal(creator);
+  await refreshWorkspace();
+  store.bumpData("creator-removed");
 }

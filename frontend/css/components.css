@@ -30,6 +30,16 @@
   gap: 14px;
 }
 
+.creator-card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.creator-card-actions .btn {
+  flex: 1;
+}
+
 .creator-card-head {
   display: flex;
   gap: 12px;

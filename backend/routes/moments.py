@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 
 from backend.database.database import get_db
@@ -56,7 +56,12 @@ def _comments_for(db: Session, moment_id: int) -> list[dict]:
 
 
 @router.get("/{moment_id}")
-def get_moment(moment_id: int, db: Session = Depends(get_db)):
+def get_moment(
+    moment_id: int,
+    include_related: bool = Query(False),
+    db: Session = Depends(get_db),
+):
+    """Detail payload. Related moments are opt-in — workspace only needs comments."""
     moment = (
         db.query(models.Moment)
         .options(joinedload(models.Moment.video).joinedload(models.Video.creator))
@@ -68,7 +73,7 @@ def get_moment(moment_id: int, db: Session = Depends(get_db)):
     return moment_to_dict(
         moment,
         comments=_comments_for(db, moment.id),
-        related=_related_for(db, moment.id),
+        related=_related_for(db, moment.id) if include_related else [],
         include_video=True,
     )
 

@@ -4,6 +4,7 @@ import { el, loading, error, empty } from "../components/Sidebar.js";
 import { openAddCreatorModal } from "../components/AddCreator.js";
 import { store } from "../store.js";
 import { bindLivePage } from "../live.js";
+import { removeCreatorFollow } from "../background.js";
 
 export async function renderCreators(root) {
   bindLivePage(root, async ({ silent }) => {
@@ -68,7 +69,11 @@ function paint(root, creators, status) {
     grid.append(
       el("div", { class: "creator-card" }, [
         el("div", { class: "creator-card-head" }, [
-          el("img", { class: "avatar", src: c.thumbnail_url || "/static/avatars/chaos.svg", alt: c.name }),
+          el("img", {
+            class: "avatar",
+            src: c.thumbnail_url || "/static/avatars/chaos.svg",
+            alt: c.name,
+          }),
           el("div", {}, [
             el("h3", { text: c.name }),
             el("div", { class: "muted", text: c.handle }),
@@ -79,11 +84,30 @@ function paint(root, creators, status) {
           meta("Clip opportunities", c.clip_opportunities),
           meta("Last scanned", c.last_scanned_at ? "Recently" : "—"),
         ]),
-        el("button", {
-          class: "btn",
-          text: "Open Creator",
-          onclick: () => navigate(`/creator/${c.id}`),
-        }),
+        el("div", { class: "creator-card-actions" }, [
+          el("button", {
+            class: "btn",
+            text: "Open",
+            onclick: () => navigate(`/creator/${c.id}`),
+          }),
+          el("button", {
+            class: "btn btn-danger",
+            text: "Remove",
+            onclick: async (e) => {
+              const btn = e.currentTarget;
+              if (!confirm(`Remove ${c.name} from your workspace?`)) return;
+              btn.disabled = true;
+              btn.textContent = "Removing…";
+              try {
+                await removeCreatorFollow(c);
+              } catch (err) {
+                alert(err.message || "Could not remove creator");
+                btn.disabled = false;
+                btn.textContent = "Remove";
+              }
+            },
+          }),
+        ]),
       ])
     );
   }

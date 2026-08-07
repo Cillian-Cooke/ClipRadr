@@ -1,8 +1,24 @@
-/** Persistent client cache + scan queue (survives navigation; helps on Vercel cold starts). */
+/** Persistent client cache + scan queue (survives navigation; keyed per account). */
 
-const KEY = "clipradar:cache:v1";
+const BASE_KEY = "clipradar:cache:v1";
+const ACCOUNT_KEY = "clipradar:cache:account";
+
+const EMPTY_PERSIST = {
+  followedChannels: [],
+  creators: [],
+  videosByCreator: {},
+  videoById: {},
+  momentsByVideo: {},
+  home: null,
+  opportunities: null,
+  scanQueue: [],
+  scanDone: {},
+  scanErrors: {},
+  lastSyncAt: null,
+};
 
 const state = {
+  accountUid: null,
   followedChannels: [], // { youtube_channel_id, name, handle, thumbnail_url }
   creators: [],
   videosByCreator: {}, // creatorId -> { videos, fetchedAt }
@@ -23,33 +39,46 @@ const state = {
 
 const listeners = new Set();
 
-function load() {
+function storageKey(uid) {
+  return uid ? `${BASE_KEY}:${uid}` : `${BASE_KEY}:guest`;
+}
+
+function applySaved(saved) {
+  Object.assign(state, {
+    followedChannels: saved.followedChannels || [],
+    creators: saved.creators || [],
+    videosByCreator: saved.videosByCreator || {},
+    videoById: saved.videoById || {},
+    momentsByVideo: saved.momentsByVideo || {},
+    home: saved.home || null,
+    opportunities: saved.opportunities || null,
+    scanQueue: saved.scanQueue || [],
+    scanDone: saved.scanDone || {},
+    scanErrors: saved.scanErrors || {},
+    lastSyncAt: saved.lastSyncAt || null,
+    busy: false,
+    currentScanId: null,
+  });
+}
+
+function loadKey(key) {
   try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return;
-    const saved = JSON.parse(raw);
-    Object.assign(state, {
-      followedChannels: saved.followedChannels || [],
-      creators: saved.creators || [],
-      videosByCreator: saved.videosByCreator || {},
-      videoById: saved.videoById || {},
-      momentsByVideo: saved.momentsByVideo || {},
-      home: saved.home || null,
-      opportunities: saved.opportunities || null,
-      scanQueue: saved.scanQueue || [],
-      scanDone: saved.scanDone || {},
-      scanErrors: saved.scanErrors || {},
-      lastSyncAt: saved.lastSyncAt || null,
-    });
+    const raw = localStorage.getItem(key);
+    if (!raw) {
+      applySaved(EMPTY_PERSIST);
+      return;
+    }
+    applySaved(JSON.parse(raw));
   } catch {
-    /* ignore corrupt cache */
+    applySaved(EMPTY_PERSIST);
   }
 }
 
 function persist() {
   try {
+    const key = storageKey(state.accountUid);
     localStorage.setItem(
-      KEY,
+      key,
       JSON.stringify({
         followedChannels: state.followedChannels,
         creators: state.creators,
@@ -64,16 +93,48 @@ function persist() {
         lastSyncAt: state.lastSyncAt,
       })
     );
+    if (state.accountUid) {
+      localStorage.setItem(ACCOUNT_KEY, state.accountUid);
+    }
   } catch {
     /* quota */
   }
 }
 
-load();
+// Boot: prefer last signed-in account cache; otherwise guest (empty).
+try {
+  const lastUid = localStorage.getItem(ACCOUNT_KEY);
+  state.accountUid = lastUid || null;
+  loadKey(storageKey(state.accountUid));
+} catch {
+  applySaved(EMPTY_PERSIST);
+}
 
 export const store = {
   get() {
     return state;
+  },
+
+  /** Switch cache namespace when Firebase user changes — new accounts start empty. */
+  bindAccount(uid) {
+    const next = uid || null;
+    if (state.accountUid === next) return false;
+    persist();
+    state.accountUid = next;
+    loadKey(storageKey(next));
+    // Fresh account / different user: never inherit another user's follows.
+    if (!next) {
+      applySaved(EMPTY_PERSIST);
+    }
+    state.dataRevision = (state.dataRevision || 0) + 1;
+    state.lastDataChange = "account-switch";
+    this.notify();
+    return true;
+  },
+
+  clearWorkspace() {
+    applySaved(EMPTY_PERSIST);
+    this.notify();
   },
 
   subscribe(fn) {
@@ -118,8 +179,42 @@ export const store = {
 
   setCreators(creators) {
     state.creators = creators || [];
-    for (const c of state.creators) this.rememberChannel(c);
+    // Authoritative server sync — followed list matches this account's follows.
+    state.followedChannels = (creators || [])
+      .filter((c) => c?.youtube_channel_id)
+      .map((c) => ({
+        youtube_channel_id: c.youtube_channel_id,
+        name: c.name,
+        handle: c.handle,
+        thumbnail_url: c.thumbnail_url,
+      }));
     state.lastSyncAt = Date.now();
+    this.notify();
+  },
+
+  removeCreatorLocal(creator) {
+    const id = creator?.id;
+    const yt = creator?.youtube_channel_id;
+    state.creators = (state.creators || []).filter((c) => c.id !== id);
+    if (yt) {
+      state.followedChannels = state.followedChannels.filter(
+        (c) => c.youtube_channel_id !== yt
+      );
+    }
+    if (id != null) {
+      const vids = state.videosByCreator[id]?.videos || [];
+      for (const v of vids) {
+        delete state.videoById[v.id];
+        delete state.momentsByVideo[v.id];
+        delete state.scanDone[v.id];
+        delete state.scanErrors[v.id];
+        state.scanQueue = state.scanQueue.filter((qid) => qid !== v.id);
+      }
+      delete state.videosByCreator[id];
+    }
+    // Drop cached home/opportunities so UI doesn't show removed creator moments.
+    state.home = null;
+    state.opportunities = null;
     this.notify();
   },
 

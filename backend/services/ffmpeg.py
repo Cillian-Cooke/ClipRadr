@@ -77,6 +77,7 @@ def export_clip(
     height: int | None = None,
     crop_position: str = "CENTER",
     stream_copy: bool = False,
+    fast: bool = False,
 ) -> Path:
     ffmpeg = ffmpeg_binary()
     if not ffmpeg:
@@ -92,8 +93,12 @@ def export_clip(
     duration = max(0.1, float(end_seconds) - float(start_seconds))
     out_w, out_h = resolve_output_size(aspect_ratio, width, height)
 
+    # Fast seek before -i (good enough for editor clips); accurate enough after yt-dlp section cut.
     cmd = [
         ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
         "-y",
         "-ss",
         f"{start_seconds:.3f}",
@@ -104,16 +109,63 @@ def export_clip(
     ]
 
     if stream_copy and aspect_ratio == "16:9":
-        cmd += ["-c", "copy"]
+        cmd += ["-c", "copy", "-movflags", "+faststart"]
     else:
         vf = crop_filter(aspect_ratio, crop_position, out_w, out_h)
-        cmd += ["-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-c:a", "aac", "-movflags", "+faststart"]
+        preset = "ultrafast" if fast else "veryfast"
+        # Keep 1080p YouTube target but encode quickly for interactive export.
+        cmd += [
+            "-vf",
+            vf,
+            "-c:v",
+            "libx264",
+            "-preset",
+            preset,
+            "-crf",
+            "23",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "160k",
+            "-movflags",
+            "+faststart",
+        ]
 
     cmd.append(str(out))
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0 or not out.exists():
         raise FFmpegError(result.stderr[-2000:] or "FFmpeg failed")
+    return out
+
+
+def remux_faststart(source_path: str | Path, output_path: str | Path) -> Path:
+    """Copy streams and add moov atom at front — near-instant finalize."""
+    ffmpeg = ffmpeg_binary()
+    if not ffmpeg:
+        raise FFmpegError("ffmpeg is not installed on this system")
+    source = Path(source_path)
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(source),
+        "-c",
+        "copy",
+        "-movflags",
+        "+faststart",
+        str(out),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0 or not out.exists():
+        raise FFmpegError(result.stderr[-1500:] or "Remux failed")
     return out
 
 

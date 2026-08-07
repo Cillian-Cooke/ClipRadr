@@ -1,6 +1,7 @@
 import { api, formatTime, downloadAuthed } from "../api.js";
 import { navigate } from "../router.js";
 import { el, loading, error } from "../components/Sidebar.js";
+import { store } from "../store.js";
 
 const MAX_CLIP_SECONDS = 120;
 const DEFAULT_CLIP_SECONDS = 30;
@@ -9,56 +10,170 @@ const YT_WIDTH = 1920;
 const YT_HEIGHT = 1080;
 
 export async function renderVideo(root, id) {
-  root.replaceChildren(loading("Opening video workspace…"));
+  const cached = store.get().videoById?.[id];
+  const cachedMoments = store.get().momentsByVideo?.[id]?.moments;
+  let paintedFromCache = false;
+
+  if (cached && Array.isArray(cachedMoments) && cachedMoments.length) {
+    try {
+      mountWorkspace(root, normalizeVideo(cached), sortMoments(cachedMoments), {
+        fromCache: true,
+      });
+      paintedFromCache = true;
+    } catch {
+      paintedFromCache = false;
+    }
+  }
+
+  if (!paintedFromCache) {
+    root.replaceChildren(loading("Opening video workspace…"));
+  }
+
   try {
     const [video, momentsRes] = await Promise.all([
       api.video(id),
       api.videoMoments(id),
     ]);
-    const moments = momentsRes.moments.sort(
-      (a, b) => a.representative_timestamp - b.representative_timestamp
-    );
-    const state = {
-      video,
-      moments,
-      selected: null,
-      detail: null,
-      clipStart: 0,
-      clipEnd: 0,
-      duration: video.duration_seconds || 1,
-      fileDuration: null,
-      player: null,
-      clipStopHandler: null,
-      previewing: false,
-    };
-
-    const preferred = new URLSearchParams(window.location.search).get("moment");
-    state.selected = preferred
-      ? moments.find((m) => String(m.id) === String(preferred)) || moments[0] || null
-      : [...moments].sort((a, b) => b.score - a.score)[0] || null;
-    if (state.selected) applyMomentBounds(state, state.selected);
-
-    const workspace = el("div", { class: "video-workspace" });
-    const left = el("div", { class: "workspace-left" });
-    const right = el("div", { class: "workspace-right" });
-    workspace.append(left, right);
-    root.replaceChildren(workspace);
-
-    buildPlayer(left, state);
-    buildTimeline(left, state);
-    buildClipBar(left, state);
-    buildRightPanel(right, state);
-
-    if (state.selected) {
-      await selectMoment(state, state.selected.id, { seek: true, play: false });
-    } else {
-      refreshPanels(state);
-    }
-
-    bindShortcuts(state);
+    const moments = sortMoments(momentsRes.moments || []);
+    store.setVideo(video);
+    store.setMoments(id, moments);
+    mountWorkspace(root, video, moments, { fromCache: false });
   } catch (e) {
-    root.replaceChildren(error(e.message));
+    if (!paintedFromCache) root.replaceChildren(error(e.message));
+    else flash(`Refresh failed: ${e.message}`);
   }
+}
+
+function sortMoments(moments) {
+  return [...(moments || [])].sort(
+    (a, b) => a.representative_timestamp - b.representative_timestamp
+  );
+}
+
+function normalizeVideo(video) {
+  // Cached list rows may lack playback fields — fill sensible defaults.
+  return {
+    ...video,
+    embed_video_id:
+      video.embed_video_id ??
+      (video.media_mode === "demo" ? null : video.youtube_video_id),
+    playback_mode:
+      video.playback_mode ||
+      (video.media_mode === "demo" && video.has_source_media ? "local" : "youtube"),
+    source_media: video.source_media || null,
+  };
+}
+
+function pickPreferredMoment(moments) {
+  const preferred = new URLSearchParams(window.location.search).get("moment");
+  if (preferred) {
+    return moments.find((m) => String(m.id) === String(preferred)) || moments[0] || null;
+  }
+  return [...moments].sort((a, b) => b.score - a.score)[0] || null;
+}
+
+let _activeWorkspace = null;
+
+function mountWorkspace(root, video, moments, { fromCache = false } = {}) {
+  // Soft-refresh after cache paint: keep the player (especially YouTube iframe) alive.
+  if (
+    _activeWorkspace?.root === root &&
+    String(_activeWorkspace.state.video?.id) === String(video.id) &&
+    !fromCache &&
+    _activeWorkspace.state.fromCache
+  ) {
+    const state = _activeWorkspace.state;
+    const nowLocal = video.playback_mode === "local" && !!video.source_media?.stream_url;
+    const wasLocal = state.player?.type === "html5";
+    if (nowLocal === wasLocal) {
+      softRefreshWorkspace(state, video, moments);
+      return;
+    }
+  }
+
+  if (_activeWorkspace?.keydownHandler) {
+    window.removeEventListener("keydown", _activeWorkspace.keydownHandler);
+  }
+
+  const state = {
+    video,
+    moments,
+    selected: null,
+    detail: null,
+    clipStart: 0,
+    clipEnd: 0,
+    duration: video.duration_seconds || 1,
+    fileDuration: null,
+    player: null,
+    clipStopHandler: null,
+    previewing: false,
+    _momentFetch: 0,
+    fromCache,
+  };
+
+  state.selected = pickPreferredMoment(moments);
+  if (state.selected) applyMomentBounds(state, state.selected);
+
+  const workspace = el("div", { class: "video-workspace" });
+  const left = el("div", { class: "workspace-left" });
+  const right = el("div", { class: "workspace-right" });
+  workspace.append(left, right);
+  root.replaceChildren(workspace);
+
+  buildPlayer(left, state);
+  buildTimeline(left, state);
+  buildClipBar(left, state);
+  buildRightPanel(right, state);
+
+  if (state.selected) {
+    selectMoment(state, state.selected.id, { seek: true, play: false });
+  } else {
+    refreshPanels(state);
+  }
+
+  const keydownHandler = bindShortcuts(state);
+  _activeWorkspace = { root, state, keydownHandler };
+}
+
+function softRefreshWorkspace(state, video, moments) {
+  state.video = video;
+  state.moments = moments;
+  state.duration = video.duration_seconds || state.duration;
+  state.fromCache = false;
+
+  const prevId = state.selected?.id;
+  state.selected =
+    (prevId && moments.find((m) => m.id === prevId)) || pickPreferredMoment(moments);
+  if (state.selected) applyMomentBounds(state, state.selected);
+
+  rebuildTimelineMarkers(state);
+  if (state.selected) {
+    selectMoment(state, state.selected.id, { seek: false, play: false });
+  } else {
+    refreshPanels(state);
+  }
+}
+
+function rebuildTimelineMarkers(state) {
+  const markers = state.ui?.markers;
+  if (!markers) return;
+  markers.replaceChildren();
+  for (const m of state.moments) {
+    const pct = (m.representative_timestamp / state.duration) * 100;
+    const marker = el("button", {
+      class: `timeline-marker ${m.confidence}`,
+      style: `left:${pct}%`,
+      title: `${m.representative_label} · ${m.topic || ""}`,
+      onclick: (e) => {
+        e.stopPropagation();
+        selectMoment(state, m.id, { seek: true, play: false });
+      },
+    });
+    marker.dataset.momentId = m.id;
+    markers.append(marker);
+  }
+  const badge = state.ui?.momentBadge;
+  if (badge) badge.textContent = `${state.moments.length} moments`;
 }
 
 function applyMomentBounds(state, moment) {
@@ -100,13 +215,15 @@ function clearClipPlayback(state) {
 
 function buildPlayer(left, state) {
   const stage = el("div", { class: "player-stage" });
+  const momentBadge = el("span", { class: "badge", text: `${state.moments.length} moments` });
   const meta = el("div", { class: "workspace-meta" }, [
     el("div", {}, [
       el("div", { class: "muted", text: state.video.creator?.name || "" }),
       el("h1", { text: state.video.title }),
     ]),
-    el("span", { class: "badge", text: `${state.moments.length} moments` }),
+    momentBadge,
   ]);
+  state.ui = { ...(state.ui || {}), momentBadge };
 
   const frame = el("div", { class: "player-frame ratio-16x9" });
   const overlay = el("div", { class: "preview-overlay", style: "display:none;" });
@@ -210,30 +327,70 @@ function buildPlayer(left, state) {
       },
     };
   } else {
-    const ytId = state.video.embed_video_id;
+    const ytId = state.video.embed_video_id || state.video.youtube_video_id;
     if (ytId && !String(ytId).startsWith("demo_")) {
+      const initialStart = Math.max(
+        0,
+        Math.floor(state.selected?.representative_timestamp || state.clipStart || 0)
+      );
+      state._ytTime = initialStart;
       const iframe = el("iframe", {
-        src: `https://www.youtube.com/embed/${ytId}?enablejsapi=1`,
+        src: `https://www.youtube.com/embed/${ytId}?start=${initialStart}&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}`,
         allow:
           "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen",
         allowfullscreen: true,
         title: state.video.title,
       });
       frame.append(iframe);
+
+      const ytCmd = (func, args = []) => {
+        try {
+          iframe.contentWindow?.postMessage(
+            JSON.stringify({ event: "command", func, args }),
+            "*"
+          );
+        } catch {
+          /* cross-origin / not ready */
+        }
+      };
+
+      // Tell the embed we want command events (enables seek without reload).
+      iframe.addEventListener("load", () => {
+        try {
+          iframe.contentWindow?.postMessage(
+            JSON.stringify({ event: "listening", id: 1 }),
+            "*"
+          );
+        } catch {
+          /* ignore */
+        }
+      });
+
       state.player = {
         type: "youtube",
         el: iframe,
         seekTo(t, play = true) {
           clearClipPlayback(state);
           hidePreviewOverlay(state);
-          iframe.src = `https://www.youtube.com/embed/${ytId}?start=${Math.floor(t)}&autoplay=${play ? 1 : 0}&enablejsapi=1`;
-          state._ytTime = t;
+          const sec = Math.max(0, Math.floor(t));
+          state._ytTime = sec;
+          // Prefer in-player seek (no cold reload). Fallback to src once if needed.
+          if (iframe.contentWindow) {
+            ytCmd("seekTo", [sec, true]);
+            if (play) ytCmd("playVideo");
+            else ytCmd("pauseVideo");
+          } else {
+            iframe.src = `https://www.youtube.com/embed/${ytId}?start=${sec}&autoplay=${play ? 1 : 0}&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}`;
+          }
           updatePlayhead(state);
+          updateScrubberPlayhead(state);
         },
         getCurrent() {
           return state._ytTime || 0;
         },
-        toggle() {},
+        toggle() {
+          ytCmd("playVideo");
+        },
         playClip(start) {
           showPreviewOverlay(state);
           this.seekTo(start, true);
@@ -631,19 +788,25 @@ async function selectMoment(state, momentId, { seek = true, play = false } = {})
   hidePreviewOverlay(state);
   state.selected = basic;
   applyMomentBounds(state, basic);
+  // Paint immediately from list data — don't wait on comments.
+  state.detail = { ...basic, comments: basic.comments || [] };
 
   state.ui.markers?.querySelectorAll(".timeline-marker").forEach((node) => {
     node.classList.toggle("active", node.dataset.momentId === String(momentId));
   });
 
-  try {
-    state.detail = await api.moment(momentId);
-  } catch {
-    state.detail = basic;
-  }
-
   if (seek) state.player.seekTo(basic.representative_timestamp, play);
   refreshPanels(state);
+
+  const fetchId = ++state._momentFetch;
+  try {
+    const res = await api.momentComments(momentId);
+    if (fetchId !== state._momentFetch || state.selected?.id !== momentId) return;
+    state.detail = { ...basic, comments: res.comments || [] };
+    renderAudiencePanel(state);
+  } catch {
+    /* keep list-only detail */
+  }
 }
 
 function updateClipRange(state) {
@@ -775,14 +938,18 @@ function openExportModal(state) {
               crop_position: "CENTER",
             });
             while (job.status === "QUEUED" || job.status === "PROCESSING") {
-              await sleep(700);
+              await sleep(450);
               job = await api.exportStatus(job.id);
-              const p = Math.max(job.progress || 0, 20);
+              const p = Math.max(job.progress || 0, 12);
               progress.firstChild.style.width = `${p}%`;
-              status.textContent =
-                p < 40 && !hasLocal
-                  ? `Fetching clip… ${p}%`
-                  : `Encoding… ${p}%`;
+              if (!hasLocal) {
+                if (p < 35) status.textContent = `Fetching clip from YouTube… ${p}%`;
+                else if (p < 75) status.textContent = `Downloading section… ${p}%`;
+                else if (p < 100) status.textContent = `Finalizing MP4… ${p}%`;
+                else status.textContent = `Almost done… ${p}%`;
+              } else {
+                status.textContent = `Encoding… ${p}%`;
+              }
             }
             if (job.status === "COMPLETED") {
               progress.firstChild.style.width = "100%";
@@ -855,6 +1022,7 @@ function bindShortcuts(state) {
     }
   };
   window.addEventListener("keydown", handler);
+  return handler;
 }
 
 function sleep(ms) {

@@ -117,6 +117,18 @@ img {
   border-color: var(--accent-strong);
 }
 
+.btn-danger {
+  background: transparent;
+  border-color: color-mix(in srgb, #c44 55%, var(--border));
+  color: #e07070;
+}
+
+.btn-danger:hover {
+  background: color-mix(in srgb, #c44 14%, transparent);
+  border-color: #c44;
+  color: #ff8a8a;
+}
+
 .btn-ghost {
   background: transparent;
 }

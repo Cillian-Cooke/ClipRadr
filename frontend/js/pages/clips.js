@@ -60,7 +60,14 @@ export async function renderClips(root) {
     wrap.append(sortBar);
 
     if (!data.moments.length) {
-      wrap.append(empty("No opportunities match these filters."));
+      const creators = store.get().creators || [];
+      wrap.append(
+        empty(
+          creators.length
+            ? "No opportunities match these filters."
+            : "No clip opportunities yet — add a creator to start your queue."
+        )
+      );
       root.replaceChildren(wrap);
       return;
     }

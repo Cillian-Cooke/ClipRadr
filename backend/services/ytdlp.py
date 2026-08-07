@@ -1,4 +1,4 @@
-"""YouTube clip-range download via yt-dlp (local only)."""
+"""YouTube clip-range download via yt-dlp (local only) — optimized for speed."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from backend.services.ffmpeg import export_clip, ffmpeg_binary
+from backend.services.ffmpeg import FFmpegError, export_clip, ffmpeg_binary, remux_faststart
 
 
 class YtDlpError(RuntimeError):
@@ -49,7 +49,7 @@ def download_clip_section(
     end_seconds: float,
     output_path: str | Path,
 ) -> Path:
-    """Download only [start, end] from YouTube into output_path."""
+    """Download only [start, end] from YouTube into output_path (mp4 preferred)."""
     start = max(0.0, float(start_seconds))
     end = max(start + 0.5, float(end_seconds))
     out = Path(output_path)
@@ -60,6 +60,8 @@ def download_clip_section(
 
     with tempfile.TemporaryDirectory(prefix="clipradar_yt_") as tmp:
         tmp_base = Path(tmp) / "section"
+        # Prefer a single progressive MP4 when possible (avoids merge + double work).
+        # Fall back to best video+audio ≤1080p.
         cmd = [
             *_ytdlp_cmd_prefix(),
             "--no-playlist",
@@ -67,12 +69,13 @@ def download_clip_section(
             "--download-sections",
             section,
             "-f",
-            "bv*[height<=1080]+ba/b[height<=1080]/b",
+            "bv*[ext=mp4][height<=1080]+ba[ext=m4a]/b[ext=mp4][height<=1080]/bv*[height<=1080]+ba/b",
             "--merge-output-format",
             "mp4",
             "-o",
             str(tmp_base) + ".%(ext)s",
             "--no-warnings",
+            "--newline",
             url,
         ]
         ff = ffmpeg_binary()
@@ -92,12 +95,11 @@ def download_clip_section(
         if src.suffix.lower() == ".mp4":
             shutil.copy2(src, out)
         else:
-            # Remux to mp4
             ff_bin = ffmpeg_binary()
             if not ff_bin:
                 raise YtDlpError("ffmpeg required to remux yt-dlp output")
             remux = subprocess.run(
-                [ff_bin, "-y", "-i", str(src), "-c", "copy", str(out)],
+                [ff_bin, "-y", "-i", str(src), "-c", "copy", "-movflags", "+faststart", str(out)],
                 capture_output=True,
                 text=True,
             )
@@ -119,9 +121,17 @@ def export_youtube_clip(
     width: int | None = None,
     height: int | None = None,
     crop_position: str = "CENTER",
+    on_progress=None,
 ) -> Path:
-    """Download the section, then normalize with the same crop/scale pipeline as local export."""
+    """
+    Fetch the IN→OUT section once, then finalize.
+
+    For standard YouTube 16:9 CENTER exports we only remux (+faststart) —
+    avoiding a full second H.264 encode. Other aspects still re-encode once.
+    """
     out = Path(output_path)
+    if on_progress:
+        on_progress(30)
     with tempfile.TemporaryDirectory(prefix="clipradar_yt_raw_") as tmp:
         raw = Path(tmp) / "raw.mp4"
         download_clip_section(
@@ -130,8 +140,21 @@ def export_youtube_clip(
             end_seconds=end_seconds,
             output_path=raw,
         )
+        if on_progress:
+            on_progress(70)
+
+        needs_crop = aspect_ratio != "16:9" or (crop_position or "CENTER").upper() != "CENTER"
+        if not needs_crop and (width in (None, 1920)) and (height in (None, 1080)):
+            try:
+                remux_faststart(raw, out)
+                if on_progress:
+                    on_progress(95)
+                return out
+            except FFmpegError:
+                pass  # fall through to encode
+
         duration = max(0.5, float(end_seconds) - float(start_seconds))
-        return export_clip(
+        result = export_clip(
             source_path=raw,
             output_path=out,
             start_seconds=0,
@@ -140,4 +163,8 @@ def export_youtube_clip(
             width=width,
             height=height,
             crop_position=crop_position,
+            fast=True,
         )
+        if on_progress:
+            on_progress(95)
+        return result
